@@ -1,0 +1,39 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Concerns\RespondsWithApi;
+use App\Http\Controllers\Controller;
+use App\Services\BansosWorkflowService;
+use Illuminate\Http\Request;
+
+class KetuaLingkunganParokiController extends Controller
+{
+    use RespondsWithApi;
+
+    protected BansosWorkflowService $workflow;
+
+    public function __construct(BansosWorkflowService $workflow)
+    {
+        $this->workflow = $workflow;
+    }
+
+    public function executeSawRanking(Request $request, $periodId)
+    {
+        $result = $this->workflow->triggerSaw((int) $periodId);
+
+        return $this->success($result, 'Perankingan SAW berhasil dijalankan.');
+    }
+
+    public function sendRankingToParoki(Request $request, $periodId)
+    {
+        $ok = $this->workflow->sendRankingToParoki((int) $periodId);
+
+        return $this->success(['ok' => (bool) $ok], 'Ranking berhasil dikirim ke paroki.');
+    }
+
+    public function activityLogs(Request $request)
+    {
+        return $this->success([], 'Log aktivitas berhasil diambil.');
+    }
+}
