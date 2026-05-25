@@ -278,6 +278,69 @@ function setButtonLoading(btn, loadingText = 'Memproses...') {
         btn.innerHTML = prev.text;
     };
 }
+
+// showFormModal: build a modal form from MASTER_CONFIG-like fields
+async function showFormModal(cfg, item = null, title = null) {
+    ensureUiContainers();
+    const root = document.getElementById('ui-modal-root');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'modal-backdrop';
+
+    title = title ?? (item ? `Ubah ${cfg.title}` : `Buat ${cfg.title}`);
+
+    // prepare field HTML, loading select options when needed
+    const fieldsHtmlParts = await Promise.all(cfg.fields.map(async (f) => {
+        const value = item ? (item[f.name] ?? '') : '';
+        if (f.type === 'select') {
+            let optionsHtml = '';
+            if (f.options) {
+                optionsHtml = f.options.map(o => `<option value="${escapeHtml(o.value)}" ${String(value) === String(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+            } else if (f.optionsEndpoint) {
+                const opts = await loadSelectOptions(f.optionsEndpoint);
+                optionsHtml = opts.map(o => `<option value="${o.id}" ${String(value) === String(o.id) ? 'selected' : ''}>${escapeHtml(o[f.optionLabel] ?? o.name ?? o.id)}</option>`).join('');
+            }
+            return `<label>${escapeHtml(f.label)}<select name="${escapeHtml(f.name)}">${optionsHtml}</select></label>`;
+        }
+
+        if (f.type === 'textarea') {
+            return `<label>${escapeHtml(f.label)}<textarea name="${escapeHtml(f.name)}">${escapeHtml(value)}</textarea></label>`;
+        }
+
+        return `<label>${escapeHtml(f.label)}<input name="${escapeHtml(f.name)}" type="${escapeHtml(f.type)}" value="${escapeHtml(value)}"></label>`;
+    }));
+
+    wrapper.innerHTML = `
+        <div class="modal-card modal-form-card">
+            <h3>${escapeHtml(title)}</h3>
+            <form id="modal-form" class="data-form">
+                <div class="form-grid">${fieldsHtmlParts.join('')}</div>
+                <div class="modal-actions">
+                    <button type="button" class="ghost-button cancel">Batal</button>
+                    <button type="submit" class="primary-button submit">Simpan</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    root.appendChild(wrapper);
+
+    return await new Promise((resolve) => {
+        wrapper.querySelector('.cancel').addEventListener('click', () => {
+            wrapper.remove();
+            resolve(null);
+        });
+
+        const form = wrapper.querySelector('#modal-form');
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(form).entries());
+            // normalize numeric fields commonly used
+            if (data.tahun) data.tahun = Number(data.tahun);
+            wrapper.remove();
+            resolve(data);
+        });
+    });
+}
 function renderShell() {
     const user = state.user;
     const roleLabel = roleLabels[user.role] ?? user.role;
@@ -772,71 +835,35 @@ async function loadSelectOptions(endpoint) {
 
 async function renderMasterForm(resource, item = null) {
     const cfg = MASTER_CONFIG[resource];
-    const container = document.getElementById('master-content');
 
+    // show modal form and get data
     const isEdit = !!(item && item.id);
-    const formId = 'master-form';
+    const modalData = await showFormModal(cfg, item, `${isEdit ? 'Ubah' : 'Buat'} ${cfg.title}`);
 
-    // build form fields
-    const fieldsHtml = await Promise.all(cfg.fields.map(async (f) => {
-        const value = item ? (item[f.name] ?? '') : '';
-        if (f.type === 'select') {
-            let optionsHtml = '';
-            if (f.options) {
-                optionsHtml = f.options.map(o => `<option value="${escapeHtml(o.value)}" ${String(value) === String(o.value) ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
-            } else if (f.optionsEndpoint) {
-                const opts = await loadSelectOptions(f.optionsEndpoint.replace('/master', '/master')); // keep path
-                optionsHtml = opts.map(o => `<option value="${o.id}" ${String(value) === String(o.id) ? 'selected' : ''}>${escapeHtml(o[f.optionLabel] ?? o.name ?? o.id)}</option>`).join('');
-            }
+    if (modalData === null) {
+        // user cancelled
+        renderMasterList(resource);
+        return;
+    }
 
-            return `<label>${escapeHtml(f.label)}<select name="${escapeHtml(f.name)}">${optionsHtml}</select></label>`;
+    setStatus('loading', 'Menyimpan...');
+    try {
+        if (isEdit) {
+            await api(`/master/${cfg.endpoint}/${item.id}`, { method: 'PUT', body: JSON.stringify(modalData) });
+            setStatus('success', `${cfg.title} berhasil diperbarui.`);
+            showToast('success', `${cfg.title} berhasil diperbarui.`);
+        } else {
+            await api(`/master/${cfg.endpoint}`, { method: 'POST', body: JSON.stringify(modalData) });
+            setStatus('success', `${cfg.title} berhasil dibuat.`);
+            showToast('success', `${cfg.title} berhasil dibuat.`);
         }
 
-        if (f.type === 'textarea') {
-            return `<label>${escapeHtml(f.label)}<textarea name="${escapeHtml(f.name)}">${escapeHtml(value)}</textarea></label>`;
-        }
-
-        return `<label>${escapeHtml(f.label)}<input name="${escapeHtml(f.name)}" type="${escapeHtml(f.type)}" value="${escapeHtml(value)}"></label>`;
-    }));
-
-    container.innerHTML = `
-        <form id="${formId}" class="data-form">
-            <h3>${isEdit ? 'Ubah' : 'Buat'} ${escapeHtml(cfg.title)}</h3>
-            <div class="form-grid">
-                ${fieldsHtml.join('')}
-            </div>
-            <div class="form-actions">
-                <button type="submit" class="primary-button">Simpan</button>
-                <button type="button" id="master-cancel" class="ghost-button">Batal</button>
-            </div>
-        </form>
-    `;
-
-    document.getElementById('master-cancel').addEventListener('click', () => renderMasterList(resource));
-
-    document.getElementById(formId).addEventListener('submit', async (e) => {
-        e.preventDefault();
-        setStatus('loading', 'Menyimpan...');
-
-        const data = Object.fromEntries(new FormData(e.target).entries());
-
-        // normalize numeric fields
-        if (data.tahun) data.tahun = Number(data.tahun);
-
-        try {
-            if (isEdit) {
-                await api(`/master/${cfg.endpoint}/${item.id}`, { method: 'PUT', body: JSON.stringify(data) });
-                setStatus('success', `${cfg.title} berhasil diperbarui.`);
-            } else {
-                await api(`/master/${cfg.endpoint}`, { method: 'POST', body: JSON.stringify(data) });
-                setStatus('success', `${cfg.title} berhasil dibuat.`);
-            }
-
-            renderMasterList(resource);
-        } catch (err) {
-            setStatus('error', formatApiError(err));
-        }
-    });
+        renderMasterList(resource);
+    } catch (err) {
+        setStatus('error', formatApiError(err));
+        showToast('error', formatApiError(err));
+        renderMasterList(resource);
+    }
 }
 
 function renderDashboard() {
