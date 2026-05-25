@@ -20,7 +20,8 @@ class KetuaLingkunganParokiController extends Controller
 
     public function executeSawRanking(Request $request, $periodId)
     {
-        $result = $this->workflow->triggerSaw((int) $periodId);
+        $user = $request->user();
+        $result = $this->workflow->triggerSaw((int) $periodId, $user ? $user->id : null);
 
         return $this->success($result, 'Perankingan SAW berhasil dijalankan.');
     }

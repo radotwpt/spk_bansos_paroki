@@ -17,11 +17,21 @@ class CalonPenerimaPolicy
 
     public function update(User $user, CalonPenerima $calon)
     {
+        if (in_array($user->role ?? '', ['super_admin'])) return true;
+
+        // Only allow updates when still in draft
+        if ($calon->status_alur !== 'draft') return false;
+
         return $this->view($user, $calon);
     }
 
     public function delete(User $user, CalonPenerima $calon)
     {
+        if (in_array($user->role ?? '', ['super_admin'])) return true;
+
+        // Only allow deletes when still in draft
+        if ($calon->status_alur !== 'draft') return false;
+
         return $this->view($user, $calon);
     }
 }

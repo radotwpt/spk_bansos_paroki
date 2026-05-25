@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\KetuaLingkunganParokiController;
 use App\Http\Controllers\Api\KetuaLingkunganStasiController;
 use App\Http\Controllers\Api\OfflineSyncController;
 use App\Http\Controllers\Api\ParokiController;
+use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\StasiController;
 use App\Http\Controllers\Api\Master\StasiController as MasterStasiController;
 use App\Http\Controllers\Api\Master\LingkunganStasiController as MasterLingkunganStasiController;
@@ -34,6 +35,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware(['role:stasi,super_admin'])->prefix('v1/stasi')->group(function () {
         Route::get('/calon-penerima-rekap', [StasiController::class, 'indexCalonPenerima']);
         Route::post('/calon-penerima/{id}/approve', [StasiController::class, 'approveByStasi']);
+        Route::post('/calon-penerima/{id}/reject', [StasiController::class, 'rejectByStasi']);
         Route::post('/surat-permohonan/generate', [StasiController::class, 'generateSuratPermohonan']);
         Route::put('/template-surat', [StasiController::class, 'updateTemplateSurat']);
     });
@@ -66,6 +68,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('/bansos-periods', MasterBansosPeriodController::class);
         Route::apiResource('/users', MasterUserController::class);
     });
+
+    // Activity logs
+    Route::get('/v1/logs/calon-penerima/{id}', [ActivityLogController::class, 'index']);
 
     // Offline sync endpoint (used by PWA IndexedDB drain)
     Route::middleware(['role:ketua_lingkungan_stasi,super_admin'])->post('/v1/offline/sync', [OfflineSyncController::class, 'sync']);

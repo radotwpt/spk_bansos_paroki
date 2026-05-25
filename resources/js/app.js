@@ -51,6 +51,7 @@ const state = {
         q: '',
         page: 1,
     },
+    currentCandidates: [],
 };
 
 const els = {
@@ -494,6 +495,13 @@ async function renderMasterList(resource) {
             });
         });
 
+        container.querySelectorAll('.view-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                renderCandidateDetail(id);
+            });
+        });
+
         container.querySelectorAll('.delete-btn').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const id = btn.dataset.id;
@@ -670,6 +678,8 @@ async function renderCandidateList(path, emptyMessage) {
     try {
         const response = await api(path);
         const rows = response.data ?? [];
+        // cache for detail views
+        state.currentCandidates = rows;
 
         if (!rows.length) {
             setContent(emptyCard(emptyMessage));
@@ -685,6 +695,7 @@ async function renderCandidateList(path, emptyMessage) {
                             <th>NIK</th>
                             <th>Status</th>
                             <th>Skor</th>
+                            <th>Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -694,12 +705,17 @@ async function renderCandidateList(path, emptyMessage) {
                                 <td>${escapeHtml(item.nik ?? '-')}</td>
                                 <td><span class="status-pill">${escapeHtml(item.status_alur ?? '-')}</span></td>
                                 <td>${escapeHtml(String(item.saw_score ?? '0.0000'))}</td>
+                                <td><button class="ghost-button view-btn" data-id="${item.id}">Lihat</button></td>
                             </tr>
                         `).join('')}
                     </tbody>
                 </table>
             </div>
         `);
+        // attach view handlers for candidate detail
+        document.getElementById('content-region').querySelectorAll('.view-btn').forEach((btn) => {
+            btn.addEventListener('click', () => renderCandidateDetail(btn.dataset.id));
+        });
     } catch (error) {
         setContent(errorCard(error.message));
     }
@@ -753,6 +769,193 @@ function renderCandidateForm() {
             setStatus('success', 'Calon penerima berhasil disimpan sebagai draft.');
         } catch (error) {
             setStatus('error', formatApiError(error));
+        }
+    });
+}
+
+async function renderCandidateDetail(id) {
+    loadingCard('Memuat detail calon...');
+
+    // try to find cached item
+    let item = state.currentCandidates.find(i => String(i.id) === String(id));
+
+    if (!item) {
+        // try to reload from current view's endpoint
+        const mapping = {
+            'my-candidates': '/lingkungan-stasi/calon-penerima',
+            'stasi-recap': '/stasi/calon-penerima-rekap',
+        };
+
+        const path = mapping[state.activeView] ?? '/lingkungan-stasi/calon-penerima';
+        try {
+            const resp = await api(path);
+            const rows = resp.data ?? [];
+            state.currentCandidates = rows;
+            item = rows.find(r => String(r.id) === String(id));
+        } catch (e) {
+            setContent(errorCard('Gagal memuat data calon.'));
+            return;
+        }
+    }
+
+    if (!item) {
+        setContent(errorCard('Calon penerima tidak ditemukan.'));
+        return;
+    }
+
+    const actions = [];
+
+    if (state.user.role === 'ketua_lingkungan_stasi' && item.status_alur === 'draft') {
+        actions.push('<button id="btn-edit" class="primary-button">Edit</button>');
+        actions.push('<button id="btn-delete" class="ghost-button danger">Hapus</button>');
+        actions.push('<button id="btn-submit" class="primary-button">Ajukan ke Stasi</button>');
+    }
+
+    if (state.user.role === 'stasi' && item.status_alur === 'diajukan_ke_stasi') {
+        actions.push('<button id="btn-approve" class="primary-button">Setujui</button>');
+        actions.push('<button id="btn-reject" class="ghost-button danger">Tolak</button>');
+    }
+
+    setContent(`
+        <section class="detail-shell">
+            <h3>${escapeHtml(item.nama_lengkap)} <small>${escapeHtml(item.nik)}</small></h3>
+            <div class="detail-grid">
+                <div><strong>Periode</strong><div>${escapeHtml(String(item.bansos_period_id ?? '-'))}</div></div>
+                <div><strong>Alamat</strong><div>${escapeHtml(item.alamat_kristen ?? '-')}</div></div>
+                <div><strong>Pendapatan</strong><div>${escapeHtml(String(item.pendapatan_keluarga ?? '0'))}</div></div>
+                <div><strong>Jumlah Tanggungan</strong><div>${escapeHtml(String(item.jumlah_tanggungan ?? '0'))}</div></div>
+                <div><strong>Status Tempat Tinggal</strong><div>${escapeHtml(item.status_tempat_tinggal ?? '-')}</div></div>
+                <div><strong>Status Hubungan</strong><div>${escapeHtml(item.status_hubungan ?? '-')}</div></div>
+                <div><strong>Status Alur</strong><div><span class="status-pill">${escapeHtml(item.status_alur)}</span></div></div>
+                <div><strong>Skor SAW</strong><div>${escapeHtml(String(item.saw_score ?? '0.0000'))}</div></div>
+            </div>
+
+            <div class="detail-actions">${actions.join(' ')}</div>
+
+            <h4>Timeline</h4>
+            <div id="candidate-timeline">Memuat timeline...</div>
+        </section>
+    `);
+
+    // attach action handlers
+    const detailContainer = document.getElementById('content-region');
+
+    const editBtn = document.getElementById('btn-edit');
+    if (editBtn) editBtn.addEventListener('click', () => renderCandidateEditForm(item));
+
+    const deleteBtn = document.getElementById('btn-delete');
+    if (deleteBtn) deleteBtn.addEventListener('click', async () => {
+        if (!confirm('Hapus calon penerima ini?')) return;
+        try {
+            await api(`/lingkungan-stasi/calon-penerima/${item.id}`, { method: 'DELETE' });
+            setStatus('success', 'Calon penerima berhasil dihapus.');
+            renderView(state.activeView);
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+        }
+    });
+
+    const submitBtn = document.getElementById('btn-submit');
+    if (submitBtn) submitBtn.addEventListener('click', async () => {
+        if (!confirm('Ajukan calon penerima ke stasi?')) return;
+        try {
+            await api(`/lingkungan-stasi/calon-penerima/${item.id}/ajukan`, { method: 'POST' });
+            setStatus('success', 'Calon penerima berhasil diajukan.');
+            renderView(state.activeView);
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+        }
+    });
+
+    const approveBtn = document.getElementById('btn-approve');
+    if (approveBtn) approveBtn.addEventListener('click', async () => {
+        if (!confirm('Setujui calon penerima?')) return;
+        try {
+            await api(`/stasi/calon-penerima/${item.id}/approve`, { method: 'POST' });
+            setStatus('success', 'Calon penerima disetujui.');
+            renderView(state.activeView);
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+        }
+    });
+
+    const rejectBtn = document.getElementById('btn-reject');
+    if (rejectBtn) rejectBtn.addEventListener('click', async () => {
+        const reason = prompt('Masukkan alasan penolakan:');
+        if (!reason) return;
+        try {
+            await api(`/stasi/calon-penerima/${item.id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+            setStatus('success', 'Calon penerima ditolak.');
+            renderView(state.activeView);
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+        }
+    });
+
+    // load timeline
+    try {
+        const res = await api(`/logs/calon-penerima/${item.id}`);
+        const logs = res.data ?? [];
+        const timelineHtml = logs.map(log => `
+            <div class="timeline-item">
+                <div class="ti-header"><strong>${escapeHtml(log.action)}</strong> <small>${escapeHtml(log.created_at ?? '')}</small></div>
+                <div class="ti-body">${escapeHtml((log.user?.name ?? 'System'))} - ${escapeHtml(JSON.stringify(log.meta ?? {}))}</div>
+            </div>
+        `).join('');
+
+        document.getElementById('candidate-timeline').innerHTML = timelineHtml || '<div class="state-card empty">Belum ada aktivitas.</div>';
+    } catch (e) {
+        document.getElementById('candidate-timeline').innerHTML = errorCard('Gagal memuat timeline.');
+    }
+}
+
+function renderCandidateEditForm(item) {
+    setContent(`
+        <form id="candidate-edit-form" class="data-form">
+            <h3>Ubah Calon Penerima</h3>
+            <div class="form-grid">
+                <label>Nama Lengkap<input name="nama_lengkap" value="${escapeHtml(item.nama_lengkap ?? '')}" required></label>
+                <label>Alamat<input name="alamat_kristen" value="${escapeHtml(item.alamat_kristen ?? '')}"></label>
+                <label>Pendapatan Keluarga<input name="pendapatan_keluarga" type="number" min="0" value="${escapeHtml(String(item.pendapatan_keluarga ?? '0'))}" required></label>
+                <label>Jumlah Tanggungan<input name="jumlah_tanggungan" type="number" min="0" value="${escapeHtml(String(item.jumlah_tanggungan ?? '0'))}" required></label>
+                <label>Status Tempat Tinggal
+                    <select name="status_tempat_tinggal" required>
+                        <option value="milik_sendiri" ${item.status_tempat_tinggal === 'milik_sendiri' ? 'selected' : ''}>Milik Sendiri</option>
+                        <option value="sewa" ${item.status_tempat_tinggal === 'sewa' ? 'selected' : ''}>Sewa</option>
+                        <option value="numpang" ${item.status_tempat_tinggal === 'numpang' ? 'selected' : ''}>Numpang</option>
+                    </select>
+                </label>
+                <label>Status Hubungan
+                    <select name="status_hubungan" required>
+                        <option value="lajang" ${item.status_hubungan === 'lajang' ? 'selected' : ''}>Lajang</option>
+                        <option value="menikah" ${item.status_hubungan === 'menikah' ? 'selected' : ''}>Menikah</option>
+                        <option value="cerai" ${item.status_hubungan === 'cerai' ? 'selected' : ''}>Cerai</option>
+                    </select>
+                </label>
+            </div>
+            <label>Urgensi Tambahan<textarea name="urgensi_tambahan_tekstual" rows="4">${escapeHtml(item.urgensi_tambahan_tekstual ?? '')}</textarea></label>
+            <div class="form-actions">
+                <button type="submit" class="primary-button">Simpan</button>
+                <button type="button" id="cancel-edit" class="ghost-button">Batal</button>
+            </div>
+        </form>
+    `);
+
+    document.getElementById('cancel-edit').addEventListener('click', () => renderCandidateDetail(item.id));
+
+    document.getElementById('candidate-edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        setStatus('loading', 'Menyimpan perubahan...');
+        const data = Object.fromEntries(new FormData(e.target).entries());
+        data.pendapatan_keluarga = Number(data.pendapatan_keluarga);
+        data.jumlah_tanggungan = Number(data.jumlah_tanggungan);
+
+        try {
+            await api(`/lingkungan-stasi/calon-penerima/${item.id}`, { method: 'PUT', body: JSON.stringify(data) });
+            setStatus('success', 'Perubahan calon penerima disimpan.');
+            renderView(state.activeView);
+        } catch (err) {
+            setStatus('error', formatApiError(err));
         }
     });
 }

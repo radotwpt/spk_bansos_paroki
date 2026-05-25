@@ -52,6 +52,25 @@ class StasiController extends Controller
         return $this->success(['ok' => true], 'Calon penerima berhasil disetujui stasi.');
     }
 
+    public function rejectByStasi(Request $request, $id)
+    {
+        $calon = CalonPenerima::findOrFail($id);
+        $this->authorize('update', $calon);
+
+        $data = $request->validate([
+            'reason' => 'required|string'
+        ]);
+
+        $user = $request->user();
+        $ok = $this->workflow->rejectData((int) $id, $data['reason'], $user->id);
+
+        if (! $ok) {
+            return $this->error('Calon penerima tidak dapat ditolak dari status saat ini.', 409);
+        }
+
+        return $this->success(['ok' => true], 'Calon penerima berhasil ditolak.');
+    }
+
     public function generateSuratPermohonan(Request $request)
     {
         // placeholder to generate surat using templates
