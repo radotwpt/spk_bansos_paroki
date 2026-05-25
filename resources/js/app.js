@@ -170,6 +170,114 @@ function errorCard(message = 'Data gagal dimuat.') {
     return `<div class="state-card error">${escapeHtml(message)}</div>`;
 }
 
+// UI helpers: toasts and modals
+function ensureUiContainers() {
+    if (!document.getElementById('ui-toast-container')) {
+        const c = document.createElement('div');
+        c.id = 'ui-toast-container';
+        c.className = 'ui-toast-container';
+        document.body.appendChild(c);
+    }
+
+    if (!document.getElementById('ui-modal-root')) {
+        const m = document.createElement('div');
+        m.id = 'ui-modal-root';
+        m.className = 'ui-modal-root';
+        document.body.appendChild(m);
+    }
+}
+
+function showToast(type, message, timeout = 4000) {
+    ensureUiContainers();
+    const container = document.getElementById('ui-toast-container');
+    const el = document.createElement('div');
+    el.className = `ui-toast ${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => {
+        el.classList.add('dismiss');
+        setTimeout(() => el.remove(), 300);
+    }, timeout);
+}
+
+function showConfirm(message, title = 'Konfirmasi') {
+    ensureUiContainers();
+    const root = document.getElementById('ui-modal-root');
+    return new Promise((resolve) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'modal-backdrop';
+        wrapper.innerHTML = `
+            <div class="modal-card">
+                <h3>${escapeHtml(title)}</h3>
+                <div class="modal-body">${escapeHtml(message)}</div>
+                <div class="modal-actions">
+                    <button class="ghost-button cancel">Batal</button>
+                    <button class="primary-button confirm">OK</button>
+                </div>
+            </div>
+        `;
+
+        root.appendChild(wrapper);
+
+        wrapper.querySelector('.cancel').addEventListener('click', () => {
+            wrapper.remove();
+            resolve(false);
+        });
+
+        wrapper.querySelector('.confirm').addEventListener('click', () => {
+            wrapper.remove();
+            resolve(true);
+        });
+    });
+}
+
+function showPrompt(label, defaultValue = '', title = 'Input') {
+    ensureUiContainers();
+    const root = document.getElementById('ui-modal-root');
+    return new Promise((resolve) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'modal-backdrop';
+        wrapper.innerHTML = `
+            <div class="modal-card">
+                <h3>${escapeHtml(title)}</h3>
+                <div class="modal-body">
+                    <label>${escapeHtml(label)}<input class="modal-input" value="${escapeHtml(defaultValue)}"></label>
+                </div>
+                <div class="modal-actions">
+                    <button class="ghost-button cancel">Batal</button>
+                    <button class="primary-button confirm">Kirim</button>
+                </div>
+            </div>
+        `;
+
+        root.appendChild(wrapper);
+
+        const input = wrapper.querySelector('.modal-input');
+        input.focus();
+
+        wrapper.querySelector('.cancel').addEventListener('click', () => {
+            wrapper.remove();
+            resolve(null);
+        });
+
+        wrapper.querySelector('.confirm').addEventListener('click', () => {
+            const v = input.value.trim();
+            wrapper.remove();
+            resolve(v);
+        });
+    });
+}
+
+function setButtonLoading(btn, loadingText = 'Memproses...') {
+    if (!btn) return () => {};
+    const prev = { disabled: btn.disabled, text: btn.innerHTML };
+    btn.disabled = true;
+    btn.innerHTML = `${escapeHtml(loadingText)}`;
+    return () => {
+        btn.disabled = prev.disabled;
+        btn.innerHTML = prev.text;
+    };
+}
 function renderShell() {
     const user = state.user;
     const roleLabel = roleLabels[user.role] ?? user.role;
@@ -231,9 +339,136 @@ function renderView(view) {
         renderTemplates();
     } else if (view === 'admin-master') {
         renderAdminMaster();
+    } else if (view === 'saw') {
+        renderSaw();
+    } else if (view === 'ranking') {
+        renderRanking();
     } else {
         renderPlaceholder(view);
     }
+}
+
+async function renderSaw() {
+    setContent(`
+        <section>
+            <h3>Proses SAW</h3>
+            <div class="form-inline">
+                <label>Periode ID<input id="saw-period-id" type="number" min="1" value="1"></label>
+                <button id="saw-run" class="primary-button">Jalankan SAW</button>
+                <button id="saw-send" class="ghost-button">Kirim ke Paroki</button>
+            </div>
+            <div id="saw-result" class="mt-4"></div>
+        </section>
+    `);
+
+    document.getElementById('saw-run').addEventListener('click', async (e) => {
+        const periodId = Number(document.getElementById('saw-period-id').value || 0);
+        if (!periodId) return setStatus('error', 'Periode tidak valid.');
+        const btn = e.target;
+        const restore = setButtonLoading(btn, 'Menjalankan...');
+        try {
+            const res = await api(`/lingkungan-paroki/proses-saw/${periodId}`, { method: 'POST' });
+            const rows = res.data ?? [];
+            const html = `
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Rank</th><th>ID</th><th>Score</th></tr></thead>
+                        <tbody>
+                            ${rows.map((r, i) => `<tr><td>${i+1}</td><td>${r.id}</td><td>${r.score}</td></tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            document.getElementById('saw-result').innerHTML = html;
+            showToast('success', 'Perankingan SAW selesai.');
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
+        }
+    });
+
+    document.getElementById('saw-send').addEventListener('click', async () => {
+        const periodId = Number(document.getElementById('saw-period-id').value || 0);
+        if (!periodId) return setStatus('error', 'Periode tidak valid.');
+        const ok = await showConfirm('Kirim hasil ranking ke Paroki?');
+        if (!ok) return;
+        try {
+            await api(`/lingkungan-paroki/kirim-ke-paroki/${periodId}`, { method: 'POST' });
+            showToast('success', 'Ranking berhasil dikirim ke paroki.');
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        }
+    });
+}
+
+async function renderRanking() {
+    setContent(`
+        <section>
+            <h3>Ranking Paroki</h3>
+            <div class="form-inline">
+                <label>Periode ID<input id="rank-period-id" type="number" min="1" value="1"></label>
+                <button id="rank-load" class="primary-button">Muat Ranking</button>
+            </div>
+            <div id="rank-result" class="mt-4"></div>
+        </section>
+    `);
+
+    document.getElementById('rank-load').addEventListener('click', async (e) => {
+        const periodId = Number(document.getElementById('rank-period-id').value || 0);
+        if (!periodId) return setStatus('error', 'Periode tidak valid.');
+        const btn = e.target;
+        const restore = setButtonLoading(btn, 'Memuat...');
+        try {
+            const res = await api(`/paroki/ranking-data/${periodId}`);
+            const rows = res.data ?? [];
+            const html = `
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Rank</th><th>Nama</th><th>NIK</th><th>Score</th><th>Aksi</th></tr></thead>
+                        <tbody>
+                            ${rows.map((r) => `<tr>
+                                <td>${escapeHtml(String(r.rank_global ?? '-'))}</td>
+                                <td>${escapeHtml(r.nama_lengkap ?? '-')}</td>
+                                <td>${escapeHtml(r.nik ?? '-')}</td>
+                                <td>${escapeHtml(String(r.saw_score ?? '0.0000'))}</td>
+                                <td>
+                                    ${r.is_penerima_sah ? '<span class="status-pill">Penerima</span>' : `<button class="primary-button finalize-btn" data-id="${r.id}">Finalisasi</button>`}
+                                </td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            document.getElementById('rank-result').innerHTML = html;
+
+            document.querySelectorAll('.finalize-btn').forEach((btn) => {
+                btn.addEventListener('click', async () => {
+                    const id = btn.dataset.id;
+                    const nominal = await showPrompt('Masukkan nominal bantuan (angka):', '0', 'Finalisasi Penerima');
+                    if (!nominal) return;
+                    const restoreBtn = setButtonLoading(btn, 'Menyimpan...');
+                    try {
+                        await api(`/paroki/penerima/${id}/keputusan`, { method: 'POST', body: JSON.stringify({ nominal: Number(nominal) }) });
+                        showToast('success', 'Keputusan final disimpan.');
+                        document.getElementById('rank-load').click();
+                    } catch (err) {
+                        showToast('error', formatApiError(err));
+                    } finally {
+                        restoreBtn();
+                    }
+                });
+            });
+
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
+        }
+    });
 }
 
 async function renderAdminMaster() {
@@ -505,13 +740,16 @@ async function renderMasterList(resource) {
         container.querySelectorAll('.delete-btn').forEach((btn) => {
             btn.addEventListener('click', async () => {
                 const id = btn.dataset.id;
-                if (!confirm('Hapus item ini?')) return;
+                const confirmed = await showConfirm('Hapus item ini?');
+                if (!confirmed) return;
                 try {
                     await api(`/master/${cfg.endpoint}/${id}`, { method: 'DELETE' });
                     setStatus('success', 'Data berhasil dihapus.');
+                    showToast('success', 'Data berhasil dihapus.');
                     renderMasterList(resource);
                 } catch (err) {
                     setStatus('error', formatApiError(err));
+                    showToast('error', formatApiError(err));
                 }
             });
         });
@@ -845,50 +1083,73 @@ async function renderCandidateDetail(id) {
 
     const deleteBtn = document.getElementById('btn-delete');
     if (deleteBtn) deleteBtn.addEventListener('click', async () => {
-        if (!confirm('Hapus calon penerima ini?')) return;
+        const ok = await showConfirm('Hapus calon penerima ini?');
+        if (!ok) return;
+        const restore = setButtonLoading(deleteBtn, 'Menghapus...');
         try {
             await api(`/lingkungan-stasi/calon-penerima/${item.id}`, { method: 'DELETE' });
             setStatus('success', 'Calon penerima berhasil dihapus.');
+            showToast('success', 'Calon penerima berhasil dihapus.');
             renderView(state.activeView);
         } catch (err) {
             setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
         }
     });
 
     const submitBtn = document.getElementById('btn-submit');
     if (submitBtn) submitBtn.addEventListener('click', async () => {
-        if (!confirm('Ajukan calon penerima ke stasi?')) return;
+        const ok = await showConfirm('Ajukan calon penerima ke stasi?');
+        if (!ok) return;
+        const restore = setButtonLoading(submitBtn, 'Mengajukan...');
         try {
             await api(`/lingkungan-stasi/calon-penerima/${item.id}/ajukan`, { method: 'POST' });
             setStatus('success', 'Calon penerima berhasil diajukan.');
+            showToast('success', 'Calon penerima berhasil diajukan.');
             renderView(state.activeView);
         } catch (err) {
             setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
         }
     });
 
     const approveBtn = document.getElementById('btn-approve');
     if (approveBtn) approveBtn.addEventListener('click', async () => {
-        if (!confirm('Setujui calon penerima?')) return;
+        const ok = await showConfirm('Setujui calon penerima?');
+        if (!ok) return;
+        const restore = setButtonLoading(approveBtn, 'Menyetujui...');
         try {
             await api(`/stasi/calon-penerima/${item.id}/approve`, { method: 'POST' });
             setStatus('success', 'Calon penerima disetujui.');
+            showToast('success', 'Calon penerima disetujui.');
             renderView(state.activeView);
         } catch (err) {
             setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
         }
     });
 
     const rejectBtn = document.getElementById('btn-reject');
     if (rejectBtn) rejectBtn.addEventListener('click', async () => {
-        const reason = prompt('Masukkan alasan penolakan:');
+        const reason = await showPrompt('Masukkan alasan penolakan:');
         if (!reason) return;
+        const restore = setButtonLoading(rejectBtn, 'Mengirim...');
         try {
             await api(`/stasi/calon-penerima/${item.id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
             setStatus('success', 'Calon penerima ditolak.');
+            showToast('success', 'Calon penerima ditolak.');
             renderView(state.activeView);
         } catch (err) {
             setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
         }
     });
 
