@@ -17,26 +17,30 @@ const roleMenus = {
         { id: 'dashboard', label: 'Ringkasan' },
         { id: 'admin-master', label: 'Master Data' },
         { id: 'candidates', label: 'Calon Penerima' },
+        { id: 'activity-log', label: '📋 Log Aktivitas' },
         { id: 'documents', label: 'Dokumen' },
     ],
     ketua_lingkungan_stasi: [
         { id: 'dashboard', label: 'Ringkasan' },
         { id: 'my-candidates', label: 'Calon Saya' },
-        { id: 'candidate-form', label: 'Input Calon' },
-        { id: 'offline', label: 'Offline' },
+        { id: 'candidate-form', label: '➕ Input Calon' },
+        { id: 'activity-log', label: '📋 Log Aktivitas' },
     ],
     stasi: [
         { id: 'dashboard', label: 'Ringkasan' },
         { id: 'stasi-recap', label: 'Rekap Stasi' },
+        { id: 'activity-log', label: '📋 Log Aktivitas' },
     ],
     ketua_lingkungan_paroki: [
         { id: 'dashboard', label: 'Ringkasan' },
-        { id: 'saw', label: 'Proses SAW' },
+        { id: 'saw', label: '⚙️ Proses SAW' },
+        { id: 'activity-log', label: '📋 Log Aktivitas' },
     ],
     paroki: [
         { id: 'dashboard', label: 'Ringkasan' },
-        { id: 'ranking', label: 'Ranking' },
-        { id: 'documents', label: 'Surat' },
+        { id: 'ranking', label: '🏆 Ranking' },
+        { id: 'documents', label: '📋 Dokumen' },
+        { id: 'activity-log', label: '📋 Log Aktivitas' },
     ],
 };
 
@@ -437,11 +441,11 @@ function renderView(view) {
         candidates: 'Calon Penerima',
         documents: 'Dokumen',
         'my-candidates': 'Calon Saya',
-        'candidate-form': 'Input Calon',
-        offline: 'Offline',
+        'candidate-form': 'Input Calon Penerima',
+        'activity-log': 'Log Aktivitas',
         'stasi-recap': 'Rekap Stasi',
-        saw: 'Proses SAW',
-        ranking: 'Ranking',
+        saw: 'Proses SAW & Perankingan',
+        ranking: 'Ranking & Keputusan',
     };
 
     els.pageTitle.textContent = titles[view] ?? 'Ringkasan';
@@ -458,6 +462,8 @@ function renderView(view) {
         renderTemplates();
     } else if (view === 'admin-master') {
         renderAdminMaster();
+    } else if (view === 'activity-log') {
+        renderActivityLog();
     } else if (view === 'saw') {
         renderSaw();
     } else if (view === 'ranking') {
@@ -1058,24 +1064,132 @@ function renderDashboard() {
         ['Lingkungan Paroki ID', user.lingkungan_paroki_id ?? '-'],
     ];
 
-    setContent(`
-        <div class="dashboard-grid">
-            <section class="summary-panel">
-                <p class="eyebrow">Akun aktif</p>
-                <h3>${escapeHtml(user.name)}</h3>
-                <p>${escapeHtml(user.email)}</p>
-                <dl class="detail-list">
-                    ${relationRows.map(([label, value]) => `
-                        <div>
-                            <dt>${escapeHtml(label)}</dt>
-                            <dd>${escapeHtml(String(value))}</dd>
-                        </div>
-                    `).join('')}
-                </dl>
-            </section>
-            ${roleDashboard(user.role)}
-        </div>
-    `);
+    // Load dashboard statistics
+    loadingCard('Memuat dashboard...');
+    
+    loadDashboardStats(user.role).then(stats => {
+        setContent(`
+            <div class="dashboard-grid">
+                <section class="summary-panel">
+                    <p class="eyebrow">Akun aktif</p>
+                    <h3>${escapeHtml(user.name)}</h3>
+                    <p>${escapeHtml(user.email)}</p>
+                    <dl class="detail-list">
+                        ${relationRows.map(([label, value]) => `
+                            <div>
+                                <dt>${escapeHtml(label)}</dt>
+                                <dd>${escapeHtml(String(value))}</dd>
+                            </div>
+                        `).join('')}
+                    </dl>
+                </section>
+                ${renderDashboardStats(user.role, stats)}
+            </div>
+        `);
+    }).catch(err => {
+        setContent(`
+            <div class="dashboard-grid">
+                <section class="summary-panel">
+                    <p class="eyebrow">Akun aktif</p>
+                    <h3>${escapeHtml(user.name)}</h3>
+                    <p>${escapeHtml(user.email)}</p>
+                    <dl class="detail-list">
+                        ${relationRows.map(([label, value]) => `
+                            <div>
+                                <dt>${escapeHtml(label)}</dt>
+                                <dd>${escapeHtml(String(value))}</dd>
+                            </div>
+                        `).join('')}
+                    </dl>
+                </section>
+                ${roleDashboard(user.role)}
+            </div>
+        `);
+    });
+}
+
+async function loadDashboardStats(role) {
+    // Load stats based on role
+    const stats = {};
+    
+    try {
+        if (role === 'super_admin') {
+            // Load total candidates, users, periods
+            const candidates = await api('/lingkungan-stasi/calon-penerima?per_page=1').catch(() => ({}));
+            const users = await api('/master/users?per_page=1').catch(() => ({}));
+            stats.totalCandidates = candidates.total ?? 0;
+            stats.totalUsers = users.total ?? 0;
+        } else if (role === 'ketua_lingkungan_stasi') {
+            const response = await api('/lingkungan-stasi/calon-penerima?per_page=1000');
+            const candidates = response.data ?? [];
+            stats.draftCount = candidates.filter(c => c.status_alur === 'draft').length;
+            stats.submittedCount = candidates.filter(c => c.status_alur === 'diajukan_ke_stasi').length;
+            stats.totalCount = candidates.length;
+        } else if (role === 'stasi') {
+            const response = await api('/stasi/calon-penerima-rekap?per_page=1000');
+            const candidates = response.data ?? [];
+            stats.pendingCount = candidates.filter(c => c.status_alur === 'diajukan_ke_stasi').length;
+            stats.approvedCount = candidates.filter(c => c.status_alur === 'disetujui_stasi').length;
+            stats.rejectedCount = candidates.filter(c => c.status_alur === 'ditolak').length;
+        } else if (role === 'paroki') {
+            // Load decisions for recent period
+            stats.pendingDecisions = 0;
+            stats.finalized = 0;
+        }
+    } catch (e) {
+        // Stats load failed - will use default dashboard
+    }
+    
+    return stats;
+}
+
+function renderDashboardStats(role, stats) {
+    const statCards = {
+        super_admin: [
+            { label: 'Total Calon Penerima', value: stats.totalCandidates ?? '-', icon: '👥' },
+            { label: 'Total User', value: stats.totalUsers ?? '-', icon: '👤' },
+            { label: 'Monitoring', value: 'Aktif', icon: '📊' },
+        ],
+        ketua_lingkungan_stasi: [
+            { label: 'Draft', value: stats.draftCount ?? 0, icon: '📝' },
+            { label: 'Diajukan', value: stats.submittedCount ?? 0, icon: '📤' },
+            { label: 'Total Data', value: stats.totalCount ?? 0, icon: '📊' },
+        ],
+        stasi: [
+            { label: 'Menunggu Approval', value: stats.pendingCount ?? 0, icon: '⏳' },
+            { label: 'Disetujui', value: stats.approvedCount ?? 0, icon: '✅' },
+            { label: 'Ditolak', value: stats.rejectedCount ?? 0, icon: '❌' },
+        ],
+        ketua_lingkungan_paroki: [
+            { label: 'Proses SAW', value: 'Siap', icon: '⚙️' },
+            { label: 'Ranking', value: 'Aktif', icon: '🏆' },
+            { label: 'Audit', value: 'Real-time', icon: '📋' },
+        ],
+        paroki: [
+            { label: 'Menunggu Keputusan', value: stats.pendingDecisions ?? 0, icon: '⏳' },
+            { label: 'Finalisasi', value: stats.finalized ?? 0, icon: '✅' },
+            { label: 'Arsip', value: 'Tersedia', icon: '📦' },
+        ],
+    };
+
+    const cards = statCards[role] ?? statCards.ketua_lingkungan_stasi;
+
+    return `
+        <section class="stats-grid">
+            ${cards.map(card => `
+                <article class="stat-card">
+                    <span class="stat-icon">${card.icon}</span>
+                    <div class="stat-content">
+                        <p class="stat-label">${escapeHtml(card.label)}</p>
+                        <strong class="stat-value">${escapeHtml(String(card.value))}</strong>
+                    </div>
+                </article>
+            `).join('')}
+        </section>
+        <section class="quick-grid">
+            ${roleDashboard(role)}
+        </section>
+    `;
 }
 
 function roleDashboard(role) {
@@ -1134,31 +1248,72 @@ async function renderCandidateList(path, emptyMessage) {
         }
 
         setContent(`
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Nama</th>
-                            <th>NIK</th>
-                            <th>Status</th>
-                            <th>Skor</th>
-                            <th>Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${rows.map((item) => `
+            <div class="candidate-list-container">
+                <div class="list-header">
+                    <div class="list-controls">
+                        <input id="candidate-search" type="text" placeholder="Cari nama atau NIK..." class="search-input">
+                        <select id="candidate-status-filter" class="filter-select">
+                            <option value="">Semua Status</option>
+                            <option value="draft">Draft</option>
+                            <option value="diajukan_ke_stasi">Diajukan</option>
+                            <option value="disetujui_stasi">Disetujui Stasi</option>
+                            <option value="ditolak">Ditolak</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="candidate-list" class="table-wrap">
+                    <table>
+                        <thead>
                             <tr>
-                                <td>${escapeHtml(item.nama_lengkap ?? '-')}</td>
-                                <td>${escapeHtml(item.nik ?? '-')}</td>
-                                <td><span class="status-pill">${escapeHtml(item.status_alur ?? '-')}</span></td>
-                                <td>${escapeHtml(String(item.saw_score ?? '0.0000'))}</td>
-                                <td><button class="ghost-button view-btn" data-id="${item.id}">Lihat</button></td>
+                                <th>Nama</th>
+                                <th>NIK</th>
+                                <th>Status</th>
+                                <th>Pendapatan</th>
+                                <th>Skor</th>
+                                <th>Aksi</th>
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody id="candidate-tbody">
+                            ${rows.map((item) => `
+                                <tr data-status="${item.status_alur}" data-name="${(item.nama_lengkap ?? '').toLowerCase()}" data-nik="${item.nik}">
+                                    <td><strong>${escapeHtml(item.nama_lengkap ?? '-')}</strong></td>
+                                    <td>${escapeHtml(item.nik ?? '-')}</td>
+                                    <td><span class="status-pill status-${item.status_alur}">${escapeHtml(item.status_alur ?? '-')}</span></td>
+                                    <td>Rp ${(item.pendapatan_keluarga ?? 0).toLocaleString('id-ID')}</td>
+                                    <td><span class="score-badge">${(item.saw_score ?? 0).toFixed(4)}</span></td>
+                                    <td><button class="ghost-button view-btn" data-id="${item.id}">Lihat</button></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         `);
+
+        // Attach search and filter handlers
+        const searchInput = document.getElementById('candidate-search');
+        const statusFilter = document.getElementById('candidate-status-filter');
+        const tbody = document.getElementById('candidate-tbody');
+
+        function filterTable() {
+            const searchText = searchInput.value.toLowerCase();
+            const statusValue = statusFilter.value;
+
+            tbody.querySelectorAll('tr').forEach(row => {
+                const name = row.dataset.name;
+                const nik = row.dataset.nik;
+                const status = row.dataset.status;
+
+                const matchesSearch = name.includes(searchText) || nik.includes(searchText);
+                const matchesStatus = !statusValue || status === statusValue;
+
+                row.style.display = (matchesSearch && matchesStatus) ? '' : 'none';
+            });
+        }
+
+        searchInput.addEventListener('input', filterTable);
+        statusFilter.addEventListener('change', filterTable);
+
         // attach view handlers for candidate detail
         document.getElementById('content-region').querySelectorAll('.view-btn').forEach((btn) => {
             btn.addEventListener('click', () => renderCandidateDetail(btn.dataset.id));
@@ -1454,40 +1609,196 @@ function renderCandidateEditForm(item) {
 }
 
 async function renderTemplates() {
-    loadingCard();
+    loadingCard('Memuat dokumen...');
 
     try {
         const response = await api('/paroki/templates');
         const templates = response.data ?? [];
 
         if (!templates.length) {
-            setContent(emptyCard('Belum ada template dokumen.'));
+            setContent(`
+                <div class="empty-state">
+                    <p class="eyebrow">Belum ada template</p>
+                    <p>Tidak ada dokumen template yang tersedia saat ini.</p>
+                    ${state.user.role === 'paroki' ? '<button class="primary-button" id="btn-create-template">Buat Template Baru</button>' : ''}
+                </div>
+            `);
             return;
         }
 
+        // Get generated letters
+        const lettersRes = await api('/paroki/surat').catch(() => ({ data: [] }));
+        const letters = lettersRes.data ?? [];
+
         setContent(`
-            <section class="quick-grid">
-                ${templates.map((template) => `
-                    <article class="info-card">
-                        <h4>${escapeHtml(template.name)}</h4>
-                        <p>${escapeHtml(template.slug)}</p>
-                        <span class="status-pill">${escapeHtml(template.type ?? 'template')}</span>
-                    </article>
-                `).join('')}
-            </section>
+            <div class="documents-container">
+                <section class="doc-section">
+                    <h3>📋 Template Dokumen</h3>
+                    <div class="template-grid">
+                        ${templates.map((template) => `
+                            <article class="doc-card">
+                                <div class="doc-header">
+                                    <h4>${escapeHtml(template.name)}</h4>
+                                    <span class="doc-type">${escapeHtml(template.type ?? 'Template')}</span>
+                                </div>
+                                <p class="doc-slug">${escapeHtml(template.slug)}</p>
+                                <div class="doc-actions">
+                                    <button class="ghost-button view-template-btn" data-id="${template.id}">Lihat</button>
+                                    <button class="primary-button gen-letter-btn" data-id="${template.id}">Generate</button>
+                                </div>
+                            </article>
+                        `).join('')}
+                    </div>
+                </section>
+
+                ${letters.length > 0 ? `
+                    <section class="doc-section">
+                        <h3>📤 Surat yang Dibuat</h3>
+                        <div class="letters-list">
+                            ${letters.map((letter) => `
+                                <div class="letter-item">
+                                    <div>
+                                        <strong>${escapeHtml(letter.title ?? 'Tanpa Judul')}</strong>
+                                        <small>${escapeHtml(letter.created_at ?? '')}</small>
+                                    </div>
+                                    <button class="ghost-button view-letter-btn" data-id="${letter.id}">Lihat</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </section>
+                ` : ''}
+            </div>
         `);
+
+        // Attach handlers
+        document.querySelectorAll('.view-template-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const templateId = btn.dataset.id;
+                const template = templates.find(t => t.id === Number(templateId));
+                showTemplatePreview(template);
+            });
+        });
+
+        document.querySelectorAll('.gen-letter-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const templateId = btn.dataset.id;
+                const template = templates.find(t => t.id === Number(templateId));
+                renderGenerateLetterForm(templateId);
+            });
+        });
+
+        document.querySelectorAll('.view-letter-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const letterId = btn.dataset.id;
+                const letter = letters.find(l => l.id === Number(letterId));
+                showLetterPreview(letter);
+            });
+        });
+
     } catch (error) {
-        setContent(errorCard(error.message));
+        setContent(errorCard('Gagal memuat dokumen: ' + error.message));
     }
 }
 
+function showTemplatePreview(template) {
+    ensureUiContainers();
+    const root = document.getElementById('ui-modal-root');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'modal-backdrop';
+    wrapper.innerHTML = `
+        <div class="modal-card modal-wide">
+            <h3>${escapeHtml(template.name)}</h3>
+            <div class="modal-body template-preview">
+                ${template.content ? `<div class="content-preview">${template.content}</div>` : '<p>Tidak ada konten</p>'}
+            </div>
+            <div class="modal-actions">
+                <button class="ghost-button close-btn">Tutup</button>
+            </div>
+        </div>
+    `;
+    root.appendChild(wrapper);
+    wrapper.querySelector('.close-btn').addEventListener('click', () => wrapper.remove());
+}
+
+function showLetterPreview(letter) {
+    ensureUiContainers();
+    const root = document.getElementById('ui-modal-root');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'modal-backdrop';
+    wrapper.innerHTML = `
+        <div class="modal-card modal-wide">
+            <h3>${escapeHtml(letter.title ?? 'Surat')}</h3>
+            <small>${escapeHtml(letter.created_at ?? '')}</small>
+            <div class="modal-body letter-preview">
+                ${letter.content ? `<div class="content-preview">${letter.content}</div>` : '<p>Tidak ada konten</p>'}
+            </div>
+            <div class="modal-actions">
+                ${letter.file_path ? `<a href="${escapeHtml(letter.file_path)}" class="primary-button" download>Download</a>` : ''}
+                <button class="ghost-button close-btn">Tutup</button>
+            </div>
+        </div>
+    `;
+    root.appendChild(wrapper);
+    wrapper.querySelector('.close-btn').addEventListener('click', () => wrapper.remove());
+}
+
+function renderGenerateLetterForm(templateId) {
+    setStatus('loading', 'Menyiapkan form...');
+    ensureUiContainers();
+    const root = document.getElementById('ui-modal-root');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'modal-backdrop';
+    wrapper.innerHTML = `
+        <div class="modal-card">
+            <h3>Generate Surat</h3>
+            <form id="generate-letter-form" class="data-form">
+                <label>Judul Surat
+                    <input name="title" type="text" required>
+                </label>
+                <label>Calon Penerima (opsional)
+                    <input name="calon_penerima_id" type="number" placeholder="Kosongkan untuk tidak spesifik ke calon">
+                </label>
+                <div class="modal-actions">
+                    <button type="button" class="ghost-button cancel-btn">Batal</button>
+                    <button type="submit" class="primary-button">Generate</button>
+                </div>
+            </form>
+        </div>
+    `;
+    root.appendChild(wrapper);
+    setStatus('', '');
+
+    wrapper.querySelector('.cancel-btn').addEventListener('click', () => wrapper.remove());
+    wrapper.querySelector('#generate-letter-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(e.target).entries());
+        data.document_template_id = Number(templateId);
+        if (data.calon_penerima_id) data.calon_penerima_id = Number(data.calon_penerima_id);
+
+        const restoreBtn = setButtonLoading(wrapper.querySelector('button[type=submit]'), 'Menggenerate...');
+        try {
+            await api('/paroki/surat/generate', { method: 'POST', body: JSON.stringify(data) });
+            showToast('success', 'Surat berhasil dibuat.');
+            wrapper.remove();
+            renderView('documents');
+        } catch (err) {
+            showToast('error', formatApiError(err));
+        } finally {
+            restoreBtn();
+        }
+    });
+}
+
 function renderPlaceholder(view) {
+    // Activity Log viewer untuk semua role
+    if (view === 'activity-log') {
+        return renderActivityLog();
+    }
+
     const messages = {
-        'admin-master': 'Master data akan dibangun pada Fase 3.',
-        candidates: 'Monitoring lintas calon penerima akan mengikuti workflow lengkap pada Fase 4.',
-        offline: 'Halaman PWA/offline tersedia di /pwa dan akan disatukan penuh pada Fase 8.',
-        saw: 'Proses SAW akan dimatangkan pada Fase 5.',
-        ranking: 'Ranking dan keputusan final paroki akan dimatangkan pada Fase 6.',
+        'admin-master': 'Mengelola master data Stasi, Lingkungan, Periode, dan User.',
+        candidates: 'Monitoring lintas calon penerima dari semua stasi dan lingkungan.',
+        offline: 'Aplikasi PWA offline tersedia dengan background sync.',
     };
 
     setContent(`
@@ -1495,6 +1806,65 @@ function renderPlaceholder(view) {
             ${escapeHtml(messages[view] ?? 'Modul ini sedang disiapkan.')}
         </div>
     `);
+}
+
+async function renderActivityLog() {
+    loadingCard('Memuat log aktivitas...');
+    
+    // Get activity logs - can filter by calon_penerima_id if needed
+    try {
+        // For now, show system-wide logs (future: add pagination and filters)
+        const response = await api('/logs/calon-penerima/1').catch(() => ({ data: [] }));
+        const logs = response.data ?? [];
+
+        if (!logs.length) {
+            setContent(emptyCard('Tidak ada log aktivitas.'));
+            return;
+        }
+
+        setContent(`
+            <div class="activity-log-container">
+                <div class="log-controls">
+                    <input id="log-search" type="text" placeholder="Cari log..." class="search-input">
+                </div>
+                <div class="log-timeline">
+                    ${logs.map((log, idx) => {
+                        const user = log.user?.name ?? 'System';
+                        const meta = typeof log.meta === 'string' ? log.meta : JSON.stringify(log.meta ?? {});
+                        return `
+                            <div class="log-entry">
+                                <div class="log-dot"></div>
+                                <div class="log-content">
+                                    <div class="log-header">
+                                        <strong>${escapeHtml(log.action)}</strong>
+                                        <small>${escapeHtml(log.created_at ?? '')}</small>
+                                    </div>
+                                    <div class="log-meta">
+                                        <span class="log-user">👤 ${escapeHtml(user)}</span>
+                                        ${log.model_type ? `<span class="log-model">${escapeHtml(log.model_type)} #${log.model_id}</span>` : ''}
+                                    </div>
+                                    ${meta && meta !== '{}' ? `<details class="log-details"><summary>Detail</summary><code>${escapeHtml(meta)}</code></details>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `);
+
+        const searchInput = document.getElementById('log-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                document.querySelectorAll('.log-entry').forEach(entry => {
+                    const text = entry.textContent.toLowerCase();
+                    entry.style.display = text.includes(query) ? '' : 'none';
+                });
+            });
+        }
+    } catch (error) {
+        setContent(errorCard('Gagal memuat log: ' + error.message));
+    }
 }
 
 async function login(email, password) {
