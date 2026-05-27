@@ -1,4 +1,5 @@
 import './bootstrap';
+import './sw-register';
 
 const appRoot = document.getElementById('app');
 const apiBase = appRoot?.dataset.apiBase ?? '/api/v1';
@@ -29,6 +30,7 @@ const roleMenus = {
     stasi: [
         { id: 'dashboard', label: 'Ringkasan' },
         { id: 'stasi-recap', label: 'Rekap Stasi' },
+        { id: 'documents', label: '📄 Surat' },
         { id: 'activity-log', label: '📋 Log Aktivitas' },
     ],
     ketua_lingkungan_paroki: [
@@ -110,34 +112,6 @@ async function api(path, options = {}) {
 
     return body;
 }
-// Check period lock state and update UI indicator
-async function updatePeriodLockDisplay(periodId) {
-    const indicatorId = 'period-lock-indicator';
-    const existing = document.getElementById(indicatorId);
-    try {
-        const res = await api(`/lingkungan-paroki/saw/weights/${periodId}`);
-        const period = res.period ?? null;
-        const isLocked = !!(period && period.is_locked);
-        if (!document.getElementById('saw-period-id')) return;
-        if (!existing) {
-            const el = document.createElement('span');
-            el.id = indicatorId;
-            el.className = 'lock-indicator';
-            document.getElementById('saw-period-id').parentNode.appendChild(el);
-        }
-        const el = document.getElementById(indicatorId);
-        el.textContent = isLocked ? `🔒 Terkunci oleh ${period.locked_by ?? 'sistem'}` : '🔓 Buka';
-        el.dataset.locked = isLocked ? '1' : '0';
-        // disable weights button when locked
-        const weightsBtn = document.getElementById('saw-weights');
-        if (weightsBtn) weightsBtn.disabled = isLocked;
-        const sendBtn = document.getElementById('saw-send');
-        if (sendBtn) sendBtn.disabled = isLocked;
-    } catch (err) {
-        // ignore, indicator optional
-    }
-}
-
 function setSession(token, user) {
     state.token = token;
     state.user = user;
@@ -310,6 +284,37 @@ function setButtonLoading(btn, loadingText = 'Memproses...') {
     };
 }
 
+async function downloadLetterPdf(letterId) {
+    const headers = {};
+    if (state.token) {
+        headers.Authorization = `Bearer ${state.token}`;
+    }
+
+    const response = await fetch(`${apiBase}/letters/${letterId}/pdf`, {
+        method: 'GET',
+        headers,
+    });
+
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        const error = new Error(body.message || 'Gagal mengunduh PDF.');
+        throw error;
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const match = disposition.match(/filename="?([^"]+)"?/i);
+    const fileName = match?.[1] ?? `surat-${letterId}.pdf`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
 // showFormModal: build a modal form from MASTER_CONFIG-like fields
 async function showFormModal(cfg, item = null, title = null) {
     ensureUiContainers();
@@ -475,210 +480,712 @@ function renderView(view) {
 
 async function renderSaw() {
     setContent(`
-        <section>
-            <h3>Proses SAW</h3>
-            <div class="form-inline">
-                <label>Periode ID<input id="saw-period-id" type="number" min="1" value="1"></label>
-                <button id="saw-run" class="primary-button">Jalankan SAW</button>
-                <button id="saw-preview" class="ghost-button">Preview</button>
-                <button id="saw-weights" class="ghost-button">Atur Bobot</button>
-                <button id="saw-results" class="ghost-button">Lihat Hasil (Audit)</button>
-                <button id="saw-send" class="ghost-button">Kirim ke Paroki</button>
+        <section class="ranking-shell">
+            <div class="ranking-hero">
+                <div>
+                    <p class="eyebrow">Fase 3</p>
+                    <h3>SAW & Ranking Calon Penerima</h3>
+                    <p class="auth-copy">Kelola bobot, cek preview perhitungan, jalankan ranking, dan kirim hasil final ke paroki.</p>
+                </div>
+                <div class="ranking-badges">
+                    <span id="saw-lock-badge" class="status-pill">Status Period</span>
+                    <span id="saw-weight-badge" class="status-pill">Total Bobot</span>
+                </div>
             </div>
-            <div id="saw-result" class="mt-4"></div>
+
+            <div class="ranking-toolbar">
+                <label>Periode
+                    <select id="saw-period-select"></select>
+                </label>
+                <button id="saw-refresh-periods" class="ghost-button">Refresh Periode</button>
+                <button id="saw-config-weights" class="ghost-button">Konfigurasi Bobot</button>
+                <button id="saw-preview-btn" class="ghost-button">Preview Perhitungan</button>
+                <button id="saw-execute-btn" class="primary-button">Execute Ranking</button>
+                <button id="saw-load-results" class="ghost-button">Lihat Hasil</button>
+                <button id="saw-send-btn" class="ghost-button">Send to Paroki</button>
+            </div>
+
+            <div id="saw-summary-panel" class="summary-panel"></div>
+            <div id="saw-preview-panel" class="state-card">Pilih periode lalu klik <strong>Preview Perhitungan</strong>.</div>
+
+            <div class="ranking-results-shell">
+                <div class="ranking-results-head">
+                    <h4>Hasil Ranking</h4>
+                    <div class="ranking-results-controls">
+                        <label>Stasi
+                            <select id="saw-filter-stasi">
+                                <option value="">Semua Stasi</option>
+                            </select>
+                        </label>
+                        <label>Top N
+                            <input id="saw-filter-top" type="number" min="0" value="0" placeholder="0 = semua">
+                        </label>
+                        <label>Urutkan
+                            <select id="saw-filter-sort">
+                                <option value="rank">Rank</option>
+                                <option value="score">Skor</option>
+                            </select>
+                        </label>
+                        <button id="saw-apply-filters" class="ghost-button">Terapkan</button>
+                    </div>
+                </div>
+
+                <div id="saw-stats-panel"></div>
+                <div id="saw-results-panel" class="state-card">Belum ada hasil ranking yang dimuat.</div>
+            </div>
         </section>
     `);
-    // update lock indicator whenever period changes
-    const periodInput = document.getElementById('saw-period-id');
-    periodInput.addEventListener('input', () => updatePeriodLockDisplay(Number(periodInput.value || 0)));
-    updatePeriodLockDisplay(Number(periodInput.value || 0));
 
-    document.getElementById('saw-run').addEventListener('click', async (e) => {
-        const periodId = Number(document.getElementById('saw-period-id').value || 0);
-        if (!periodId) return setStatus('error', 'Periode tidak valid.');
-        const btn = e.target;
-        const restore = setButtonLoading(btn, 'Menjalankan...');
-        try {
-            const res = await api(`/lingkungan-paroki/proses-saw/${periodId}`, { method: 'POST' });
-            const rows = res.data ?? [];
-            const html = `
+    const periodSelect = document.getElementById('saw-period-select');
+    const lockBadge = document.getElementById('saw-lock-badge');
+    const weightBadge = document.getElementById('saw-weight-badge');
+    const summaryPanel = document.getElementById('saw-summary-panel');
+    const previewPanel = document.getElementById('saw-preview-panel');
+    const statsPanel = document.getElementById('saw-stats-panel');
+    const resultsPanel = document.getElementById('saw-results-panel');
+    const stasiFilter = document.getElementById('saw-filter-stasi');
+    const topFilter = document.getElementById('saw-filter-top');
+    const sortFilter = document.getElementById('saw-filter-sort');
+
+    let periods = [];
+    let latestWeightsInfo = null;
+
+    const getPeriodId = () => Number(periodSelect.value || 0);
+
+    const toFixed = (value, digits = 4) => Number(value || 0).toFixed(digits);
+    const asPercent = (value) => `${(Number(value || 0) * 100).toFixed(2)}%`;
+
+    const renderSummary = (period, weightData = null) => {
+        if (!period) {
+            summaryPanel.innerHTML = '<div class="state-card empty">Belum ada periode tersedia.</div>';
+            return;
+        }
+
+        const approvedCount = Number(period.approved_count || 0);
+        const rankedCount = Number(period.ranked_count || 0);
+        const totalWeight = weightData ? Number(weightData.total_weight || 0) : 0;
+
+        summaryPanel.innerHTML = `
+            <div class="stats-grid">
+                <article class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Periode</p>
+                        <strong class="stat-value">${escapeHtml(period.nama_periode)}</strong>
+                        <small>Tahun ${escapeHtml(String(period.tahun))}</small>
+                    </div>
+                </article>
+                <article class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Calon Disetujui Stasi</p>
+                        <strong class="stat-value">${escapeHtml(String(approvedCount))}</strong>
+                    </div>
+                </article>
+                <article class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Calon Diranking</p>
+                        <strong class="stat-value">${escapeHtml(String(rankedCount))}</strong>
+                    </div>
+                </article>
+            </div>
+            <div class="detail-list">
+                <div><dt>Status Periode</dt><dd>${escapeHtml(period.status_periode ?? '-')}</dd></div>
+                <div><dt>Bobot Aktif</dt><dd>${escapeHtml(totalWeight.toFixed(4))} (${escapeHtml(asPercent(totalWeight))})</dd></div>
+                <div><dt>Mode Bobot</dt><dd>${weightData?.use_global ? 'Global' : 'Override Periode'}</dd></div>
+            </div>
+        `;
+    };
+
+    const renderPreview = (previewData) => {
+        const summary = previewData.summary ?? {};
+        const decisionMatrix = previewData.decision_matrix ?? [];
+        const normalizationMatrix = previewData.normalization_matrix ?? [];
+        const scoring = previewData.scoring ?? [];
+
+        previewPanel.innerHTML = `
+            <section class="preview-step">
+                <h4>Step 1 - Ringkasan</h4>
+                <div class="detail-list">
+                    <div><dt>Total Kandidat</dt><dd>${escapeHtml(String(summary.total_candidates ?? 0))}</dd></div>
+                    <div><dt>Total Disetujui Stasi</dt><dd>${escapeHtml(String(summary.total_approved_stasi ?? 0))}</dd></div>
+                    <div><dt>Bobot C1-C4</dt><dd>${escapeHtml(JSON.stringify(summary.weights ?? {}))}</dd></div>
+                </div>
+            </section>
+            <section class="preview-step">
+                <h4>Step 2 - Matriks Keputusan (X)</h4>
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Rank</th><th>ID</th><th>Score</th></tr></thead>
+                        <thead>
+                            <tr><th>ID</th><th>NIK</th><th>Nama</th><th>C1</th><th>C2</th><th>C3</th><th>C4</th></tr>
+                        </thead>
                         <tbody>
-                            ${rows.map((r, i) => `<tr><td>${i+1}</td><td>${r.id}</td><td>${r.score}</td></tr>`).join('')}
+                            ${decisionMatrix.map((row) => `
+                                <tr>
+                                    <td>${escapeHtml(String(row.id))}</td>
+                                    <td>${escapeHtml(row.nik ?? '-')}</td>
+                                    <td>${escapeHtml(row.nama_lengkap ?? '-')}</td>
+                                    <td>${escapeHtml(toFixed(row.c1_pendapatan, 2))}</td>
+                                    <td>${escapeHtml(toFixed(row.c2_tanggungan, 2))}</td>
+                                    <td>${escapeHtml(toFixed(row.c3_tempat_tinggal, 2))}</td>
+                                    <td>${escapeHtml(toFixed(row.c4_status_hubungan, 2))}</td>
+                                </tr>
+                            `).join('')}
                         </tbody>
                     </table>
                 </div>
-            `;
-            document.getElementById('saw-result').innerHTML = html;
-            showToast('success', 'Perankingan SAW selesai.');
+            </section>
+            <section class="preview-step">
+                <h4>Step 3 - Normalisasi (R)</h4>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>ID</th><th>NIK</th><th>Nama</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th></tr>
+                        </thead>
+                        <tbody>
+                            ${normalizationMatrix.map((row) => `
+                                <tr>
+                                    <td>${escapeHtml(String(row.id))}</td>
+                                    <td>${escapeHtml(row.nik ?? '-')}</td>
+                                    <td>${escapeHtml(row.nama_lengkap ?? '-')}</td>
+                                    <td>${escapeHtml(toFixed(row.r1, 4))}</td>
+                                    <td>${escapeHtml(toFixed(row.r2, 4))}</td>
+                                    <td>${escapeHtml(toFixed(row.r3, 4))}</td>
+                                    <td>${escapeHtml(toFixed(row.r4, 4))}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+            <section class="preview-step">
+                <h4>Step 4 - Skor (V)</h4>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr><th>Rank</th><th>ID</th><th>NIK</th><th>Nama</th><th>Skor</th></tr>
+                        </thead>
+                        <tbody>
+                            ${scoring.map((row) => `
+                                <tr>
+                                    <td>${escapeHtml(String(row.rank))}</td>
+                                    <td>${escapeHtml(String(row.id))}</td>
+                                    <td>${escapeHtml(row.nik ?? '-')}</td>
+                                    <td>${escapeHtml(row.nama_lengkap ?? '-')}</td>
+                                    <td><span class="score-badge">${escapeHtml(toFixed(row.score, 4))}</span></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="form-actions">
+                    <button class="ghost-button" type="button" disabled>Download Excel (preview)</button>
+                    <button class="ghost-button" type="button" disabled>Download PDF (preview)</button>
+                </div>
+            </section>
+        `;
+    };
+
+    const renderResults = (payload) => {
+        const rows = payload.rows ?? [];
+        const stats = payload.stats ?? {};
+        const stasiOptions = payload.stasi_options ?? [];
+
+        stasiFilter.innerHTML = `<option value="">Semua Stasi</option>${stasiOptions.map((s) => `
+            <option value="${escapeHtml(String(s.id))}" ${String(payload.filters?.stasi_id ?? '') === String(s.id) ? 'selected' : ''}>${escapeHtml(s.nama_stasi)}</option>
+        `).join('')}`;
+
+        statsPanel.innerHTML = `
+            <div class="stats-grid">
+                <article class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Total Ranked</p>
+                        <strong class="stat-value">${escapeHtml(String(stats.total_ranked ?? 0))}</strong>
+                    </div>
+                </article>
+                <article class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Rata-Rata Skor</p>
+                        <strong class="stat-value">${escapeHtml(toFixed(stats.average_score, 4))}</strong>
+                    </div>
+                </article>
+                <article class="stat-card">
+                    <div class="stat-content">
+                        <p class="stat-label">Min - Max</p>
+                        <strong class="stat-value">${escapeHtml(toFixed(stats.min_score, 4))} - ${escapeHtml(toFixed(stats.max_score, 4))}</strong>
+                    </div>
+                </article>
+            </div>
+            <div class="distribution-list">
+                ${(stats.distribution_per_stasi ?? []).map((d) => `<span class="status-pill">${escapeHtml(d.stasi ?? 'Tanpa Stasi')}: ${escapeHtml(String(d.count))}</span>`).join('')}
+            </div>
+        `;
+
+        if (!rows.length) {
+            resultsPanel.innerHTML = '<div class="state-card empty">Belum ada data hasil ranking pada filter ini.</div>';
+            return;
+        }
+
+        resultsPanel.innerHTML = `
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Rank Global</th>
+                            <th>Rank Stasi</th>
+                            <th>NIK</th>
+                            <th>Nama</th>
+                            <th>Stasi</th>
+                            <th>Lingkungan</th>
+                            <th>Skor</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.map((row) => `
+                            <tr>
+                                <td>${escapeHtml(String(row.rank_global ?? '-'))}</td>
+                                <td>${escapeHtml(String(row.rank_internal_stasi ?? '-'))}</td>
+                                <td>${escapeHtml(row.nik ?? '-')}</td>
+                                <td>${escapeHtml(row.nama_lengkap ?? '-')}</td>
+                                <td>${escapeHtml(row.stasi_nama ?? '-')}</td>
+                                <td>${escapeHtml(row.lingkungan_stasi_nama ?? '-')}</td>
+                                <td><span class="score-badge">${escapeHtml(toFixed(row.score, 4))}</span></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <div class="form-actions">
+                <button class="ghost-button" type="button" disabled>Export Excel</button>
+                <button class="ghost-button" type="button" disabled>Export PDF</button>
+            </div>
+        `;
+    };
+
+    const refreshPeriodMeta = async () => {
+        const periodId = getPeriodId();
+        const selectedPeriod = periods.find((p) => Number(p.id) === periodId);
+
+        if (!selectedPeriod) {
+            lockBadge.textContent = 'Periode tidak ditemukan';
+            lockBadge.className = 'status-pill status-ditolak';
+            weightBadge.textContent = 'Total Bobot: -';
+            renderSummary(null, null);
+            return;
+        }
+
+        try {
+            const response = await api(`/ranking/weights?period_id=${periodId}`);
+            latestWeightsInfo = response.data ?? null;
+            const periodInfo = latestWeightsInfo?.period ?? selectedPeriod;
+            const totalWeight = Number(latestWeightsInfo?.total_weight ?? 0);
+            const isLocked = Boolean(periodInfo?.is_locked);
+
+            lockBadge.textContent = isLocked ? 'Periode Terkunci' : 'Periode Terbuka';
+            lockBadge.className = `status-pill ${isLocked ? 'status-ditolak' : 'status-disetujui_stasi'}`;
+            weightBadge.textContent = `Total Bobot: ${totalWeight.toFixed(4)} (${asPercent(totalWeight)})`;
+            weightBadge.className = `status-pill ${Math.abs(totalWeight - 1) <= 0.0001 ? 'status-disetujui_stasi' : 'status-draft'}`;
+
+            document.getElementById('saw-config-weights').disabled = isLocked;
+            document.getElementById('saw-execute-btn').disabled = isLocked;
+
+            renderSummary(periodInfo ?? selectedPeriod, latestWeightsInfo);
         } catch (err) {
+            lockBadge.textContent = 'Gagal memuat status period';
+            lockBadge.className = 'status-pill status-ditolak';
             setStatus('error', formatApiError(err));
+        }
+    };
+
+    const loadPeriods = async (preferredId = null) => {
+        const response = await api('/ranking/periods');
+        periods = response.data ?? [];
+
+        if (!periods.length) {
+            periodSelect.innerHTML = '<option value="">Belum ada periode</option>';
+            renderSummary(null, null);
+            return;
+        }
+
+        periodSelect.innerHTML = periods.map((period) => `
+            <option value="${escapeHtml(String(period.id))}">
+                ${escapeHtml(period.nama_periode)} (${escapeHtml(String(period.tahun))})
+            </option>
+        `).join('');
+
+        const chosenId = preferredId || getPeriodId() || periods[0].id;
+        periodSelect.value = String(chosenId);
+        await refreshPeriodMeta();
+    };
+
+    const loadPreview = async () => {
+        const periodId = getPeriodId();
+        if (!periodId) {
+            setStatus('error', 'Periode tidak valid.');
+            return;
+        }
+
+        const button = document.getElementById('saw-preview-btn');
+        const restore = setButtonLoading(button, 'Menyiapkan preview...');
+        try {
+            const response = await api(`/ranking/preview?period_id=${periodId}`);
+            renderPreview(response.data?.preview ?? {});
+            showToast('success', 'Preview SAW berhasil dimuat.');
+        } catch (err) {
+            previewPanel.innerHTML = errorCard(formatApiError(err));
             showToast('error', formatApiError(err));
         } finally {
             restore();
         }
-    });
+    };
 
-    document.getElementById('saw-preview').addEventListener('click', async () => {
-        const periodId = Number(document.getElementById('saw-period-id').value || 0);
-        if (!periodId) return setStatus('error', 'Periode tidak valid.');
-        const btn = document.getElementById('saw-preview');
-        const restore = setButtonLoading(btn, 'Mempersiapkan preview...');
+    const loadResults = async () => {
+        const periodId = getPeriodId();
+        if (!periodId) {
+            setStatus('error', 'Periode tidak valid.');
+            return;
+        }
+
+        const params = new URLSearchParams();
+        params.set('period_id', String(periodId));
+        if (stasiFilter.value) params.set('stasi_id', stasiFilter.value);
+        if (topFilter.value && Number(topFilter.value) > 0) params.set('top', String(Number(topFilter.value)));
+        if (sortFilter.value) params.set('sort', sortFilter.value);
+
+        const button = document.getElementById('saw-load-results');
+        const restore = setButtonLoading(button, 'Memuat hasil...');
         try {
-            const res = await api(`/lingkungan-paroki/saw/preview/${periodId}`);
-            const rows = res.preview ?? [];
-            const html = `
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr><th>Rank</th><th>ID</th><th>Score</th></tr></thead>
-                        <tbody>
-                            ${rows.map((r, i) => `<tr><td>${i+1}</td><td>${r.id}</td><td>${r.score}</td></tr>`).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-            document.getElementById('saw-result').innerHTML = html;
-            showToast('info', 'Preview perankingan siap. Preview tidak menyimpan hasil.');
+            const response = await api(`/ranking/results?${params.toString()}`);
+            renderResults(response.data ?? {});
         } catch (err) {
-            setStatus('error', formatApiError(err));
+            resultsPanel.innerHTML = errorCard(formatApiError(err));
             showToast('error', formatApiError(err));
         } finally {
             restore();
         }
-    });
+    };
 
-    document.getElementById('saw-weights').addEventListener('click', async () => {
-        const periodId = Number(document.getElementById('saw-period-id').value || 0) || null;
-        try {
-            const res = await api(`/lingkungan-paroki/saw/weights/${periodId ?? ''}`);
-            const criteria = res.criteria ?? [];
-            // build modal form
-            const formHtml = `
-                <form id="saw-weights-form">
+    const openWeightsModal = async () => {
+        const periodId = getPeriodId();
+        if (!periodId) {
+            setStatus('error', 'Periode tidak valid.');
+            return;
+        }
+
+        const response = await api(`/ranking/weights?period_id=${periodId}`);
+        const payload = response.data ?? {};
+        const criteria = payload.criteria ?? [];
+        const isLocked = Boolean(payload.period?.is_locked);
+
+        ensureUiContainers();
+        const root = document.getElementById('ui-modal-root');
+        const wrapper = document.createElement('div');
+        wrapper.className = 'modal-backdrop';
+        wrapper.innerHTML = `
+            <div class="modal-card modal-form-card">
+                <h3>Konfigurasi Bobot SAW</h3>
+                <p class="auth-copy">Periode: <strong>${escapeHtml(payload.period?.nama_periode ?? '-')}</strong></p>
+                <form id="ranking-weights-form" class="data-form">
+                    <label class="toggle-row">
+                        <input type="checkbox" name="use_global" ${payload.use_global ? 'checked' : ''} ${isLocked ? 'disabled' : ''}>
+                        Gunakan bobot global (hapus override periode)
+                    </label>
                     <div class="form-grid">
-                        ${criteria.map(c => `
-                            <label>${escapeHtml(c.label)}<input name="${escapeHtml(c.key)}" type="number" step="0.0001" min="0" max="1" value="${escapeHtml(String(c.weight))}"></label>
+                        ${criteria.map((item) => `
+                            <label>
+                                ${escapeHtml(item.label)} (${escapeHtml(item.type)})
+                                <input type="number" name="${escapeHtml(item.key)}" step="0.0001" min="0" max="1" value="${escapeHtml(String(item.weight))}" ${isLocked ? 'disabled' : ''} required>
+                            </label>
                         `).join('')}
                     </div>
-                    <div class="modal-actions"><button type="button" class="ghost-button cancel">Batal</button><button type="submit" class="primary-button">Simpan</button></div>
+                    <div class="state-card" id="weights-total-indicator"></div>
+                    <div class="modal-actions">
+                        <button type="button" class="ghost-button" id="weights-reset-default" ${isLocked ? 'disabled' : ''}>Reset Default</button>
+                        <button type="button" class="ghost-button" id="weights-cancel">Batal</button>
+                        <button type="submit" class="primary-button" ${isLocked ? 'disabled' : ''}>Simpan Bobot</button>
+                    </div>
                 </form>
+            </div>
+        `;
+        root.appendChild(wrapper);
+
+        const form = wrapper.querySelector('#ranking-weights-form');
+        const totalIndicator = wrapper.querySelector('#weights-total-indicator');
+        const useGlobalCheckbox = form.querySelector('input[name="use_global"]');
+        const weightInputs = [...form.querySelectorAll('input[type="number"]')];
+
+        const computeTotal = () => {
+            const total = weightInputs.reduce((sum, input) => sum + Number(input.value || 0), 0);
+            const valid = Math.abs(total - 1.0) <= 0.0001;
+            totalIndicator.innerHTML = `
+                <strong>Total Bobot: ${escapeHtml(total.toFixed(4))}</strong>
+                <div>${valid ? 'Valid (100%)' : 'Invalid - harus 1.0000 (100%)'}</div>
             `;
-            ensureUiContainers();
-            const root = document.getElementById('ui-modal-root');
-            const wrapper = document.createElement('div');
-            wrapper.className = 'modal-backdrop';
-            wrapper.innerHTML = `<div class="modal-card"><h3>Atur Bobot (Periode: ${escapeHtml(res.period?.nama_periode ?? 'global')})</h3>${formHtml}</div>`;
-            root.appendChild(wrapper);
+            totalIndicator.className = `state-card ${valid ? '' : 'error'}`;
+            return { total, valid };
+        };
 
-            wrapper.querySelector('.cancel').addEventListener('click', () => wrapper.remove());
-            const submitBtn = wrapper.querySelector('button[type=submit]');
-            if (res.period && res.period.is_locked) {
-                if (submitBtn) submitBtn.disabled = true;
-                const warn = document.createElement('div'); warn.className = 'state-card warning'; warn.textContent = 'Periode terkunci — bobot tidak dapat diubah.'; wrapper.querySelector('.modal-card').insertAdjacentElement('afterbegin', warn);
-            }
+        const syncUseGlobalState = () => {
+            const useGlobal = useGlobalCheckbox.checked;
+            weightInputs.forEach((input) => {
+                input.disabled = useGlobal || isLocked;
+            });
+        };
 
-            wrapper.querySelector('#saw-weights-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const data = Object.fromEntries(new FormData(e.target).entries());
-                // sum check
-                const weights = {};
-                Object.keys(data).forEach(k => weights[k] = Number(data[k]));
-                const total = Object.values(weights).reduce((a,b) => a + b, 0);
-                if (Math.abs(total - 1.0) > 0.0001) return alert('Total bobot harus berjumlah 1.0');
-                try {
-                    await api(`/lingkungan-paroki/saw/weights/${periodId ?? ''}`, { method: 'POST', body: JSON.stringify({ weights }) });
-                    showToast('success', 'Bobot disimpan');
-                    wrapper.remove();
-                } catch (err) {
-                    showToast('error', formatApiError(err));
+        weightInputs.forEach((input) => input.addEventListener('input', computeTotal));
+        useGlobalCheckbox.addEventListener('change', syncUseGlobalState);
+        syncUseGlobalState();
+        computeTotal();
+
+        wrapper.querySelector('#weights-reset-default').addEventListener('click', () => {
+            const defaults = {
+                c1_pendapatan: 0.4,
+                c2_tanggungan: 0.3,
+                c3_tempat_tinggal: 0.15,
+                c4_status_hubungan: 0.15,
+            };
+            weightInputs.forEach((input) => {
+                if (defaults[input.name] !== undefined) {
+                    input.value = defaults[input.name];
                 }
             });
+            computeTotal();
+        });
 
-        } catch (err) {
-            showToast('error', formatApiError(err));
-        }
-    });
+        wrapper.querySelector('#weights-cancel').addEventListener('click', () => wrapper.remove());
 
-    document.getElementById('saw-results').addEventListener('click', async () => {
-        const periodId = Number(document.getElementById('saw-period-id').value || 0);
-        if (!periodId) return setStatus('error', 'Periode tidak valid.');
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            const useGlobal = useGlobalCheckbox.checked;
+            const weights = {};
+            weightInputs.forEach((input) => {
+                weights[input.name] = Number(input.value || 0);
+            });
+
+            const { valid } = computeTotal();
+            if (!useGlobal && !valid) {
+                showToast('error', 'Total bobot harus tepat 1.0000 sebelum disimpan.');
+                return;
+            }
+
+            const restore = setButtonLoading(form.querySelector('button[type="submit"]'), 'Menyimpan...');
+            try {
+                await api('/ranking/weights', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        period_id: periodId,
+                        use_global: useGlobal,
+                        weights,
+                    }),
+                });
+                showToast('success', 'Bobot SAW berhasil disimpan.');
+                wrapper.remove();
+                await loadPeriods(periodId);
+            } catch (err) {
+                showToast('error', formatApiError(err));
+            } finally {
+                restore();
+            }
+        });
+    };
+
+    document.getElementById('saw-refresh-periods').addEventListener('click', async () => {
         try {
-            const res = await api(`/lingkungan-paroki/saw/results/${periodId}`);
-            const rows = res.data ?? [];
-            const html = `
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr><th>Rank</th><th>Nama</th><th>Score</th><th>Weights</th><th>By</th><th>Time</th></tr></thead>
-                        <tbody>
-                            ${rows.map(r => {
-                                const by = (r.createdBy && r.createdBy.name) || (r.created_by && r.created_by.name) || 'System';
-                                const weights = r.weights_used ?? r.weightsUsed ?? {};
-                                return `<tr>
-                                    <td>${escapeHtml(String(r.rank ?? '-'))}</td>
-                                    <td>${escapeHtml(r.calon?.nama_lengkap ?? '-')}</td>
-                                    <td>${escapeHtml(String(r.score ?? '0.0000'))}</td>
-                                    <td>${escapeHtml(JSON.stringify(weights))}</td>
-                                    <td>${escapeHtml(by)}</td>
-                                    <td>${escapeHtml(r.created_at ?? '')}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-            document.getElementById('saw-result').innerHTML = html;
+            await loadPeriods(getPeriodId());
+            showToast('success', 'Data periode diperbarui.');
         } catch (err) {
             showToast('error', formatApiError(err));
         }
     });
 
-    document.getElementById('saw-send').addEventListener('click', async () => {
-        const periodId = Number(document.getElementById('saw-period-id').value || 0);
-        if (!periodId) return setStatus('error', 'Periode tidak valid.');
-        const ok = await showConfirm('Kirim hasil ranking ke Paroki?');
-        if (!ok) return;
+    periodSelect.addEventListener('change', async () => {
+        await refreshPeriodMeta();
+        statsPanel.innerHTML = '';
+        resultsPanel.innerHTML = '<div class="state-card">Silakan klik "Lihat Hasil" untuk memuat ranking.</div>';
+    });
+
+    document.getElementById('saw-config-weights').addEventListener('click', async () => {
         try {
-            await api(`/lingkungan-paroki/kirim-ke-paroki/${periodId}`, { method: 'POST' });
-            showToast('success', 'Ranking berhasil dikirim ke paroki.');
+            await openWeightsModal();
         } catch (err) {
-            setStatus('error', formatApiError(err));
             showToast('error', formatApiError(err));
         }
     });
+
+    document.getElementById('saw-preview-btn').addEventListener('click', loadPreview);
+    document.getElementById('saw-load-results').addEventListener('click', loadResults);
+    document.getElementById('saw-apply-filters').addEventListener('click', loadResults);
+
+    document.getElementById('saw-execute-btn').addEventListener('click', async (event) => {
+        const periodId = getPeriodId();
+        if (!periodId) {
+            setStatus('error', 'Periode tidak valid.');
+            return;
+        }
+
+        const confirmed = await showConfirm(
+            'Anda akan menjalankan ranking untuk periode ini. Data ranking sebelumnya akan direset dan operasi ini tidak bisa dibatalkan.',
+            'Execute Ranking'
+        );
+        if (!confirmed) return;
+
+        const restore = setButtonLoading(event.target, 'Menjalankan...');
+        try {
+            const response = await api('/ranking/execute', {
+                method: 'POST',
+                body: JSON.stringify({ period_id: periodId }),
+            });
+            showToast('success', `Ranking selesai untuk ${response.data?.ranked_count ?? 0} calon.`);
+            await loadPeriods(periodId);
+            await loadResults();
+        } catch (err) {
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
+        }
+    });
+
+    document.getElementById('saw-send-btn').addEventListener('click', async (event) => {
+        const periodId = getPeriodId();
+        if (!periodId) {
+            setStatus('error', 'Periode tidak valid.');
+            return;
+        }
+
+        const confirmed = await showConfirm(
+            'Kirim hasil ranking ke paroki dan kunci periode ini?',
+            'Send to Paroki'
+        );
+        if (!confirmed) return;
+
+        const restore = setButtonLoading(event.target, 'Mengirim...');
+        try {
+            await api(`/ranking/send-to-paroki/${periodId}`, { method: 'POST' });
+            showToast('success', 'Hasil ranking berhasil dikirim ke paroki.');
+            await loadPeriods(periodId);
+            await loadResults();
+        } catch (err) {
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
+        }
+    });
+
+    try {
+        await loadPeriods();
+    } catch (err) {
+        summaryPanel.innerHTML = errorCard(formatApiError(err));
+    }
 }
 
 async function renderRanking() {
     setContent(`
-        <section>
-            <h3>Ranking Paroki</h3>
-            <div class="form-inline">
-                <label>Periode ID<input id="rank-period-id" type="number" min="1" value="1"></label>
+        <section class="ranking-shell">
+            <div class="ranking-hero">
+                <div>
+                    <p class="eyebrow">Paroki View</p>
+                    <h3>Ranking Calon dari Lingkungan Paroki</h3>
+                    <p class="auth-copy">Mode readonly untuk review hasil ranking, dengan opsi finalisasi penerima sesuai alur existing.</p>
+                </div>
+            </div>
+            <div class="ranking-toolbar">
+                <label>Periode
+                    <select id="rank-period-select"></select>
+                </label>
+                <label>Stasi
+                    <select id="rank-stasi-filter">
+                        <option value="">Semua Stasi</option>
+                    </select>
+                </label>
+                <label>Top N
+                    <input id="rank-top-filter" type="number" min="0" value="0" placeholder="0 = semua">
+                </label>
                 <button id="rank-load" class="primary-button">Muat Ranking</button>
             </div>
-            <div id="rank-result" class="mt-4"></div>
+            <div id="rank-stats"></div>
+            <div id="rank-result" class="state-card">Pilih periode lalu klik "Muat Ranking".</div>
         </section>
     `);
 
+    const periodSelect = document.getElementById('rank-period-select');
+    const stasiFilter = document.getElementById('rank-stasi-filter');
+    const topFilter = document.getElementById('rank-top-filter');
+    const statsPanel = document.getElementById('rank-stats');
+    const resultPanel = document.getElementById('rank-result');
+    let periods = [];
+    let stasiMap = new Map();
+
+    const toFixed = (value, digits = 4) => Number(value || 0).toFixed(digits);
+
+    const loadPeriods = async () => {
+        const response = await api('/paroki/ranking-periods');
+        periods = response.data ?? [];
+
+        if (!periods.length) {
+            periodSelect.innerHTML = '<option value="">Belum ada periode</option>';
+            return;
+        }
+
+        periodSelect.innerHTML = periods.map((period) => `
+            <option value="${escapeHtml(String(period.id))}">${escapeHtml(period.nama_periode)} (${escapeHtml(String(period.tahun))})</option>
+        `).join('');
+    };
+
     document.getElementById('rank-load').addEventListener('click', async (e) => {
-        const periodId = Number(document.getElementById('rank-period-id').value || 0);
+        const periodId = Number(periodSelect.value || 0);
         if (!periodId) return setStatus('error', 'Periode tidak valid.');
         const btn = e.target;
         const restore = setButtonLoading(btn, 'Memuat...');
         try {
-            const res = await api(`/paroki/ranking-data/${periodId}`);
+            const params = new URLSearchParams();
+            if (stasiFilter.value) params.set('stasi_id', stasiFilter.value);
+            if (topFilter.value && Number(topFilter.value) > 0) params.set('top', String(Number(topFilter.value)));
+
+            const res = await api(`/paroki/ranking-data/${periodId}${params.toString() ? `?${params.toString()}` : ''}`);
             const rows = res.data ?? [];
+
+            stasiMap = new Map();
+            rows.forEach((row) => {
+                if (row.stasi?.id) {
+                    stasiMap.set(row.stasi.id, row.stasi.nama_stasi);
+                }
+            });
+
+            stasiFilter.innerHTML = `<option value="">Semua Stasi</option>${[...stasiMap.entries()].map(([id, name]) => `
+                <option value="${escapeHtml(String(id))}" ${stasiFilter.value === String(id) ? 'selected' : ''}>${escapeHtml(name)}</option>
+            `).join('')}`;
+
+            const scores = rows.map((r) => Number(r.saw_score || 0));
+            const total = scores.length;
+            const avg = total ? scores.reduce((sum, score) => sum + score, 0) / total : 0;
+            const min = total ? Math.min(...scores) : 0;
+            const max = total ? Math.max(...scores) : 0;
+
+            statsPanel.innerHTML = `
+                <div class="stats-grid">
+                    <article class="stat-card"><div class="stat-content"><p class="stat-label">Total Ranked</p><strong class="stat-value">${escapeHtml(String(total))}</strong></div></article>
+                    <article class="stat-card"><div class="stat-content"><p class="stat-label">Rata-Rata</p><strong class="stat-value">${escapeHtml(toFixed(avg, 4))}</strong></div></article>
+                    <article class="stat-card"><div class="stat-content"><p class="stat-label">Min - Max</p><strong class="stat-value">${escapeHtml(toFixed(min, 4))} - ${escapeHtml(toFixed(max, 4))}</strong></div></article>
+                </div>
+            `;
+
+            if (!rows.length) {
+                resultPanel.innerHTML = '<div class="state-card empty">Tidak ada data ranking untuk filter ini.</div>';
+                return;
+            }
+
             const html = `
                 <div class="table-wrap">
                     <table>
-                        <thead><tr><th>Rank</th><th>Nama</th><th>NIK</th><th>Score</th><th>Aksi</th></tr></thead>
+                        <thead><tr><th>Rank Global</th><th>Rank Stasi</th><th>Nama</th><th>NIK</th><th>Stasi</th><th>Lingkungan</th><th>Score</th><th>Aksi</th></tr></thead>
                         <tbody>
                             ${rows.map((r) => `<tr>
                                 <td>${escapeHtml(String(r.rank_global ?? '-'))}</td>
+                                <td>${escapeHtml(String(r.rank_internal_stasi ?? '-'))}</td>
                                 <td>${escapeHtml(r.nama_lengkap ?? '-')}</td>
                                 <td>${escapeHtml(r.nik ?? '-')}</td>
-                                <td>${escapeHtml(String(r.saw_score ?? '0.0000'))}</td>
+                                <td>${escapeHtml(r.stasi?.nama_stasi ?? '-')}</td>
+                                <td>${escapeHtml(r.lingkungan_stasi?.nama_lingkungan_stasi ?? '-')}</td>
+                                <td><span class="score-badge">${escapeHtml(String(r.saw_score ?? '0.0000'))}</span></td>
                                 <td>
                                     ${r.is_penerima_sah ? '<span class="status-pill">Penerima</span>' : `<button class="primary-button finalize-btn" data-id="${r.id}">Finalisasi</button>`}
                                 </td>
@@ -687,7 +1194,7 @@ async function renderRanking() {
                     </table>
                 </div>
             `;
-            document.getElementById('rank-result').innerHTML = html;
+            resultPanel.innerHTML = html;
 
             document.querySelectorAll('.finalize-btn').forEach((btn) => {
                 btn.addEventListener('click', async () => {
@@ -714,6 +1221,12 @@ async function renderRanking() {
             restore();
         }
     });
+
+    try {
+        await loadPeriods();
+    } catch (err) {
+        resultPanel.innerHTML = errorCard(formatApiError(err));
+    }
 }
 
 async function renderAdminMaster() {
@@ -1609,92 +2122,450 @@ function renderCandidateEditForm(item) {
 }
 
 async function renderTemplates() {
-    loadingCard('Memuat dokumen...');
+    loadingCard('Memuat modul dokumen...');
 
-    try {
-        const response = await api('/paroki/templates');
-        const templates = response.data ?? [];
+    const role = state.user.role;
+    const canManageTemplates = ['super_admin', 'paroki'].includes(role);
+    const canGeneratePermohonan = ['super_admin', 'stasi'].includes(role);
+    const canGenerateEdaran = ['super_admin', 'paroki'].includes(role);
 
-        if (!templates.length) {
-            setContent(`
-                <div class="empty-state">
-                    <p class="eyebrow">Belum ada template</p>
-                    <p>Tidak ada dokumen template yang tersedia saat ini.</p>
-                    ${state.user.role === 'paroki' ? '<button class="primary-button" id="btn-create-template">Buat Template Baru</button>' : ''}
-                </div>
-            `);
-            return;
-        }
+    const letterTypeLabel = (type) => {
+        if (type === 'permohonan_stasi') return 'Permohonan Stasi';
+        if (type === 'edaran_paroki') return 'Edaran Paroki';
+        return '-';
+    };
 
-        // Get generated letters
-        const lettersRes = await api('/paroki/surat').catch(() => ({ data: [] }));
-        const letters = lettersRes.data ?? [];
+    const reload = async () => {
+        const jenis = document.getElementById('letters-filter-type')?.value ?? '';
+        const periodId = document.getElementById('letters-filter-period')?.value ?? '';
+        const search = document.getElementById('letters-filter-search')?.value?.trim() ?? '';
+
+        const query = new URLSearchParams();
+        query.set('per_page', '30');
+        if (jenis) query.set('jenis_surat', jenis);
+        if (periodId) query.set('period_id', periodId);
+        if (search) query.set('q', search);
+
+        const [templatesRes, lettersRes, periodsRes, stasisRes] = await Promise.all([
+            api('/templates?per_page=100'),
+            api(`/letters?${query.toString()}`),
+            api('/letters/periods'),
+            api('/letters/stasis').catch(() => ({ data: [] })),
+        ]);
+
+        const templates = templatesRes.data?.data ?? templatesRes.data ?? [];
+        const letters = lettersRes.data?.data ?? lettersRes.data ?? [];
+        const periods = periodsRes.data ?? [];
+        const stasis = stasisRes.data ?? [];
 
         setContent(`
             <div class="documents-container">
                 <section class="doc-section">
-                    <h3>📋 Template Dokumen</h3>
+                    <div class="list-header">
+                        <div>
+                            <p class="eyebrow">Template Management</p>
+                            <h3>Template Dokumen</h3>
+                        </div>
+                        ${canManageTemplates ? '<button id="doc-create-template" class="primary-button">Tambah Template</button>' : ''}
+                    </div>
+
                     <div class="template-grid">
                         ${templates.map((template) => `
                             <article class="doc-card">
                                 <div class="doc-header">
                                     <h4>${escapeHtml(template.name)}</h4>
-                                    <span class="doc-type">${escapeHtml(template.type ?? 'Template')}</span>
+                                    <span class="doc-type">${escapeHtml(letterTypeLabel(template.type))}</span>
                                 </div>
                                 <p class="doc-slug">${escapeHtml(template.slug)}</p>
+                                <p class="doc-slug">Dipakai: ${escapeHtml(String(template.generated_letters_count ?? 0))} surat</p>
                                 <div class="doc-actions">
-                                    <button class="ghost-button view-template-btn" data-id="${template.id}">Lihat</button>
-                                    <button class="primary-button gen-letter-btn" data-id="${template.id}">Generate</button>
+                                    <button class="ghost-button view-template-btn" data-id="${template.id}">Preview</button>
+                                    ${canManageTemplates ? `<button class="ghost-button edit-template-btn" data-id="${template.id}">Edit</button>` : ''}
+                                    ${canManageTemplates ? `<button class="ghost-button danger del-template-btn" data-id="${template.id}">Hapus</button>` : ''}
                                 </div>
                             </article>
-                        `).join('')}
+                        `).join('') || '<div class="state-card empty">Belum ada template.</div>'}
                     </div>
                 </section>
 
-                ${letters.length > 0 ? `
+                ${(canGeneratePermohonan || canGenerateEdaran) ? `
                     <section class="doc-section">
-                        <h3>📤 Surat yang Dibuat</h3>
-                        <div class="letters-list">
-                            ${letters.map((letter) => `
-                                <div class="letter-item">
-                                    <div>
-                                        <strong>${escapeHtml(letter.title ?? 'Tanpa Judul')}</strong>
-                                        <small>${escapeHtml(letter.created_at ?? '')}</small>
+                        <p class="eyebrow">Letter Generation</p>
+                        <h3>Generate Surat</h3>
+                        <div class="documents-generator-grid">
+                            ${canGeneratePermohonan ? `
+                                <form id="form-generate-permohonan" class="data-form">
+                                    <h4>Surat Permohonan Stasi</h4>
+                                    <label>Template
+                                        <select name="template_id" required>
+                                            <option value="">Pilih template</option>
+                                            ${templates.filter((t) => t.type === 'permohonan_stasi').map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    <label>Periode
+                                        <select name="period_id" required>
+                                            <option value="">Pilih periode</option>
+                                            ${periods.map((p) => `<option value="${p.id}">${escapeHtml(p.nama_periode)} (${escapeHtml(String(p.tahun))})</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    ${role === 'super_admin' ? `
+                                        <label>Stasi
+                                            <select name="stasi_id" required>
+                                                <option value="">Pilih stasi</option>
+                                                ${stasis.map((s) => `<option value="${s.id}">${escapeHtml(s.nama_stasi)}</option>`).join('')}
+                                            </select>
+                                        </label>
+                                    ` : ''}
+                                    <label>Nomor Surat (opsional)
+                                        <input name="nomor_surat" type="text" placeholder="Auto-generate jika kosong">
+                                    </label>
+                                    <div class="form-actions">
+                                        <button type="button" class="ghost-button btn-next-number" data-type="permohonan_stasi">Nomor Otomatis</button>
+                                        <button type="submit" class="primary-button">Generate & Simpan</button>
                                     </div>
-                                    <button class="ghost-button view-letter-btn" data-id="${letter.id}">Lihat</button>
-                                </div>
-                            `).join('')}
+                                </form>
+                            ` : ''}
+
+                            ${canGenerateEdaran ? `
+                                <form id="form-generate-edaran" class="data-form">
+                                    <h4>Surat Edaran Paroki</h4>
+                                    <label>Template
+                                        <select name="template_id" required>
+                                            <option value="">Pilih template</option>
+                                            ${templates.filter((t) => t.type === 'edaran_paroki').map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    <label>Periode
+                                        <select name="period_id" required>
+                                            <option value="">Pilih periode</option>
+                                            ${periods.map((p) => `<option value="${p.id}">${escapeHtml(p.nama_periode)} (${escapeHtml(String(p.tahun))})</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    <label>Stasi (opsional, kosong = semua)
+                                        <select name="stasi_ids" multiple size="4">
+                                            ${stasis.map((s) => `<option value="${s.id}">${escapeHtml(s.nama_stasi)}</option>`).join('')}
+                                        </select>
+                                    </label>
+                                    <label>Nomor Surat (opsional)
+                                        <input name="nomor_surat" type="text" placeholder="Auto-generate jika kosong">
+                                    </label>
+                                    <div class="form-actions">
+                                        <button type="button" class="ghost-button btn-next-number" data-type="edaran_paroki">Nomor Otomatis</button>
+                                        <button type="submit" class="primary-button">Generate & Simpan</button>
+                                    </div>
+                                </form>
+                            ` : ''}
                         </div>
                     </section>
                 ` : ''}
+
+                <section class="doc-section">
+                    <div class="list-header">
+                        <div>
+                            <p class="eyebrow">Archive</p>
+                            <h3>Arsip Surat</h3>
+                        </div>
+                    </div>
+                    <div class="list-controls">
+                        <select id="letters-filter-type" class="filter-select">
+                            <option value="">Semua Jenis</option>
+                            <option value="permohonan_stasi" ${jenis === 'permohonan_stasi' ? 'selected' : ''}>Permohonan Stasi</option>
+                            <option value="edaran_paroki" ${jenis === 'edaran_paroki' ? 'selected' : ''}>Edaran Paroki</option>
+                        </select>
+                        <select id="letters-filter-period" class="filter-select">
+                            <option value="">Semua Periode</option>
+                            ${periods.map((p) => `<option value="${p.id}" ${String(periodId) === String(p.id) ? 'selected' : ''}>${escapeHtml(p.nama_periode)} (${escapeHtml(String(p.tahun))})</option>`).join('')}
+                        </select>
+                        <input id="letters-filter-search" class="search-input" placeholder="Cari nomor/judul..." value="${escapeHtml(search)}">
+                        <button id="letters-apply-filter" class="ghost-button">Filter</button>
+                        <button id="letters-reset-filter" class="ghost-button">Reset</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Nomor Surat</th>
+                                    <th>Jenis</th>
+                                    <th>Periode</th>
+                                    <th>Tanggal</th>
+                                    <th>Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${letters.map((letter) => `
+                                    <tr>
+                                        <td>${escapeHtml(letter.nomor_surat ?? '-')}</td>
+                                        <td>${escapeHtml(letterTypeLabel(letter.jenis_surat))}</td>
+                                        <td>${escapeHtml(letter.period?.nama_periode ?? '-')}</td>
+                                        <td>${escapeHtml(letter.created_at ?? '-')}</td>
+                                        <td class="doc-row-actions">
+                                            <button class="ghost-button view-letter-btn" data-id="${letter.id}">View</button>
+                                            <button class="ghost-button dl-letter-btn" data-id="${letter.id}">PDF</button>
+                                            <button class="ghost-button danger del-letter-btn" data-id="${letter.id}">Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('') || '<tr><td colspan="5">Belum ada arsip surat.</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
             </div>
         `);
 
-        // Attach handlers
-        document.querySelectorAll('.view-template-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const templateId = btn.dataset.id;
-                const template = templates.find(t => t.id === Number(templateId));
-                showTemplatePreview(template);
+        const openTemplateForm = async (template = null) => {
+            const isEdit = !!template;
+            ensureUiContainers();
+            const root = document.getElementById('ui-modal-root');
+            const wrapper = document.createElement('div');
+            wrapper.className = 'modal-backdrop';
+            wrapper.innerHTML = `
+                <div class="modal-card modal-wide">
+                    <h3>${isEdit ? 'Edit Template' : 'Buat Template Baru'}</h3>
+                    <form id="template-form" class="data-form">
+                        <div class="form-grid">
+                            <label>Jenis Surat
+                                <select name="type" required>
+                                    <option value="permohonan_stasi" ${template?.type === 'permohonan_stasi' ? 'selected' : ''}>Permohonan Stasi</option>
+                                    <option value="edaran_paroki" ${template?.type === 'edaran_paroki' ? 'selected' : ''}>Edaran Paroki</option>
+                                </select>
+                            </label>
+                            <label>Judul Template
+                                <input name="name" value="${escapeHtml(template?.name ?? '')}" required>
+                            </label>
+                            <label>Slug
+                                <input name="slug" value="${escapeHtml(template?.slug ?? '')}" required>
+                            </label>
+                            <label>Placeholder Helper
+                                <select id="placeholder-select">
+                                    <option value="">Pilih placeholder</option>
+                                    <option value="{{nama_periode}}">{{nama_periode}}</option>
+                                    <option value="{{tahun}}">{{tahun}}</option>
+                                    <option value="{{nama_stasi}}">{{nama_stasi}}</option>
+                                    <option value="{{nama_lingkungan}}">{{nama_lingkungan}}</option>
+                                    <option value="{{tanggal}}">{{tanggal}}</option>
+                                    <option value="{{nomor_surat}}">{{nomor_surat}}</option>
+                                    <option value="{{daftar_penerima}}">{{daftar_penerima}}</option>
+                                    <option value="{{total_penerima}}">{{total_penerima}}</option>
+                                    <option value="{{total_nominal}}">{{total_nominal}}</option>
+                                </select>
+                            </label>
+                        </div>
+                        <label>HTML Content
+                            <textarea id="template-content" name="content" rows="16" required>${escapeHtml(template?.content ?? '')}</textarea>
+                        </label>
+                        <div class="modal-actions">
+                            <button type="button" class="ghost-button close-btn">Batal</button>
+                            <button type="button" class="ghost-button preview-btn">Preview</button>
+                            <button type="submit" class="primary-button">${isEdit ? 'Simpan Perubahan' : 'Simpan Template'}</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            root.appendChild(wrapper);
+
+            const form = wrapper.querySelector('#template-form');
+            const textarea = wrapper.querySelector('#template-content');
+
+            wrapper.querySelector('#placeholder-select').addEventListener('change', (e) => {
+                const value = e.target.value;
+                if (!value) return;
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                textarea.value = `${textarea.value.slice(0, start)}${value}${textarea.value.slice(end)}`;
+                textarea.focus();
+            });
+
+            wrapper.querySelector('.preview-btn').addEventListener('click', () => {
+                showTemplatePreview({ name: form.name.value || 'Preview', content: textarea.value });
+            });
+
+            wrapper.querySelector('.close-btn').addEventListener('click', () => wrapper.remove());
+
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const data = Object.fromEntries(new FormData(form).entries());
+                const restore = setButtonLoading(form.querySelector('button[type="submit"]'), 'Menyimpan...');
+                try {
+                    if (isEdit) {
+                        await api(`/templates/${template.id}`, { method: 'PUT', body: JSON.stringify(data) });
+                    } else {
+                        await api('/templates', { method: 'POST', body: JSON.stringify(data) });
+                    }
+                    wrapper.remove();
+                    showToast('success', `Template berhasil ${isEdit ? 'diperbarui' : 'dibuat'}.`);
+                    await reload();
+                } catch (err) {
+                    showToast('error', formatApiError(err));
+                } finally {
+                    restore();
+                }
+            });
+        };
+
+        if (canManageTemplates) {
+            const createBtn = document.getElementById('doc-create-template');
+            if (createBtn) createBtn.addEventListener('click', () => openTemplateForm());
+        }
+
+        document.querySelectorAll('.view-template-btn').forEach((button) => {
+            button.addEventListener('click', () => {
+                const template = templates.find((item) => item.id === Number(button.dataset.id));
+                if (template) showTemplatePreview(template);
             });
         });
 
-        document.querySelectorAll('.gen-letter-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const templateId = btn.dataset.id;
-                const template = templates.find(t => t.id === Number(templateId));
-                renderGenerateLetterForm(templateId);
+        if (canManageTemplates) {
+            document.querySelectorAll('.edit-template-btn').forEach((button) => {
+                button.addEventListener('click', () => {
+                    const template = templates.find((item) => item.id === Number(button.dataset.id));
+                    if (template) openTemplateForm(template);
+                });
+            });
+
+            document.querySelectorAll('.del-template-btn').forEach((button) => {
+                button.addEventListener('click', async () => {
+                    const ok = await showConfirm('Hapus template ini?');
+                    if (!ok) return;
+                    try {
+                        await api(`/templates/${button.dataset.id}`, { method: 'DELETE' });
+                        showToast('success', 'Template berhasil dihapus.');
+                        await reload();
+                    } catch (err) {
+                        showToast('error', formatApiError(err));
+                    }
+                });
+            });
+        }
+
+        const applyFilter = document.getElementById('letters-apply-filter');
+        if (applyFilter) applyFilter.addEventListener('click', reload);
+        const resetFilter = document.getElementById('letters-reset-filter');
+        if (resetFilter) {
+            resetFilter.addEventListener('click', async () => {
+                document.getElementById('letters-filter-type').value = '';
+                document.getElementById('letters-filter-period').value = '';
+                document.getElementById('letters-filter-search').value = '';
+                await reload();
+            });
+        }
+
+        document.querySelectorAll('.view-letter-btn').forEach((button) => {
+            button.addEventListener('click', async () => {
+                const res = await api(`/letters/${button.dataset.id}`);
+                showLetterPreview(res.data);
             });
         });
 
-        document.querySelectorAll('.view-letter-btn').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const letterId = btn.dataset.id;
-                const letter = letters.find(l => l.id === Number(letterId));
-                showLetterPreview(letter);
+        document.querySelectorAll('.dl-letter-btn').forEach((button) => {
+            button.addEventListener('click', async () => {
+                try {
+                    await downloadLetterPdf(button.dataset.id);
+                } catch (err) {
+                    showToast('error', err.message);
+                }
             });
         });
 
+        document.querySelectorAll('.del-letter-btn').forEach((button) => {
+            button.addEventListener('click', async () => {
+                const ok = await showConfirm('Hapus arsip surat ini?');
+                if (!ok) return;
+                try {
+                    await api(`/letters/${button.dataset.id}`, { method: 'DELETE' });
+                    showToast('success', 'Arsip surat dihapus.');
+                    await reload();
+                } catch (err) {
+                    showToast('error', formatApiError(err));
+                }
+            });
+        });
+
+        const autoNumberButtons = document.querySelectorAll('.btn-next-number');
+        autoNumberButtons.forEach((button) => {
+            button.addEventListener('click', async () => {
+                const form = button.closest('form');
+                const periodId = Number(form.querySelector('select[name="period_id"]').value || 0);
+                if (!periodId) {
+                    showToast('error', 'Pilih periode terlebih dahulu.');
+                    return;
+                }
+
+                const period = periods.find((p) => p.id === periodId);
+                if (!period) {
+                    showToast('error', 'Periode tidak ditemukan.');
+                    return;
+                }
+
+                try {
+                    const res = await api(`/letters/next-number?type=${button.dataset.type}&year=${period.tahun}`);
+                    form.querySelector('input[name="nomor_surat"]').value = res.data?.next_number ?? '';
+                    showToast('success', 'Nomor surat otomatis berhasil diisi.');
+                } catch (err) {
+                    showToast('error', formatApiError(err));
+                }
+            });
+        });
+
+        const formPermohonan = document.getElementById('form-generate-permohonan');
+        if (formPermohonan) {
+            formPermohonan.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const data = Object.fromEntries(new FormData(formPermohonan).entries());
+                data.period_id = Number(data.period_id);
+                data.template_id = Number(data.template_id);
+                if (data.stasi_id) data.stasi_id = Number(data.stasi_id);
+                if (!data.nomor_surat) delete data.nomor_surat;
+
+                const restore = setButtonLoading(formPermohonan.querySelector('button[type="submit"]'), 'Menggenerate...');
+                try {
+                    const res = await api('/letters/generate-permohonan-stasi', {
+                        method: 'POST',
+                        body: JSON.stringify(data),
+                    });
+                    showToast('success', 'Surat permohonan berhasil dibuat.');
+                    showLetterPreview(res.data);
+                    await reload();
+                } catch (err) {
+                    showToast('error', formatApiError(err));
+                } finally {
+                    restore();
+                }
+            });
+        }
+
+        const formEdaran = document.getElementById('form-generate-edaran');
+        if (formEdaran) {
+            formEdaran.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const fd = new FormData(formEdaran);
+                const data = {
+                    template_id: Number(fd.get('template_id')),
+                    period_id: Number(fd.get('period_id')),
+                    nomor_surat: fd.get('nomor_surat')?.toString().trim() || undefined,
+                    stasi_ids: [...formEdaran.querySelector('select[name="stasi_ids"]').selectedOptions].map((opt) => Number(opt.value)),
+                };
+                if (!data.nomor_surat) delete data.nomor_surat;
+
+                const restore = setButtonLoading(formEdaran.querySelector('button[type="submit"]'), 'Menggenerate...');
+                try {
+                    const res = await api('/letters/generate-edaran-paroki', {
+                        method: 'POST',
+                        body: JSON.stringify(data),
+                    });
+                    showToast('success', 'Surat edaran berhasil dibuat.');
+                    showLetterPreview(res.data);
+                    await reload();
+                } catch (err) {
+                    showToast('error', formatApiError(err));
+                } finally {
+                    restore();
+                }
+            });
+        }
+    };
+
+    try {
+        await reload();
     } catch (error) {
         setContent(errorCard('Gagal memuat dokumen: ' + error.message));
     }
@@ -1733,60 +2604,23 @@ function showLetterPreview(letter) {
                 ${letter.content ? `<div class="content-preview">${letter.content}</div>` : '<p>Tidak ada konten</p>'}
             </div>
             <div class="modal-actions">
-                ${letter.file_path ? `<a href="${escapeHtml(letter.file_path)}" class="primary-button" download>Download</a>` : ''}
+                ${letter.id ? `<button class="primary-button download-pdf-btn" data-id="${letter.id}">Download PDF</button>` : ''}
                 <button class="ghost-button close-btn">Tutup</button>
             </div>
         </div>
     `;
     root.appendChild(wrapper);
     wrapper.querySelector('.close-btn').addEventListener('click', () => wrapper.remove());
-}
-
-function renderGenerateLetterForm(templateId) {
-    setStatus('loading', 'Menyiapkan form...');
-    ensureUiContainers();
-    const root = document.getElementById('ui-modal-root');
-    const wrapper = document.createElement('div');
-    wrapper.className = 'modal-backdrop';
-    wrapper.innerHTML = `
-        <div class="modal-card">
-            <h3>Generate Surat</h3>
-            <form id="generate-letter-form" class="data-form">
-                <label>Judul Surat
-                    <input name="title" type="text" required>
-                </label>
-                <label>Calon Penerima (opsional)
-                    <input name="calon_penerima_id" type="number" placeholder="Kosongkan untuk tidak spesifik ke calon">
-                </label>
-                <div class="modal-actions">
-                    <button type="button" class="ghost-button cancel-btn">Batal</button>
-                    <button type="submit" class="primary-button">Generate</button>
-                </div>
-            </form>
-        </div>
-    `;
-    root.appendChild(wrapper);
-    setStatus('', '');
-
-    wrapper.querySelector('.cancel-btn').addEventListener('click', () => wrapper.remove());
-    wrapper.querySelector('#generate-letter-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const data = Object.fromEntries(new FormData(e.target).entries());
-        data.document_template_id = Number(templateId);
-        if (data.calon_penerima_id) data.calon_penerima_id = Number(data.calon_penerima_id);
-
-        const restoreBtn = setButtonLoading(wrapper.querySelector('button[type=submit]'), 'Menggenerate...');
-        try {
-            await api('/paroki/surat/generate', { method: 'POST', body: JSON.stringify(data) });
-            showToast('success', 'Surat berhasil dibuat.');
-            wrapper.remove();
-            renderView('documents');
-        } catch (err) {
-            showToast('error', formatApiError(err));
-        } finally {
-            restoreBtn();
-        }
-    });
+    const downloadBtn = wrapper.querySelector('.download-pdf-btn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', async () => {
+            try {
+                await downloadLetterPdf(downloadBtn.dataset.id);
+            } catch (err) {
+                showToast('error', err.message);
+            }
+        });
+    }
 }
 
 function renderPlaceholder(view) {
@@ -1808,59 +2642,112 @@ function renderPlaceholder(view) {
     `);
 }
 
-async function renderActivityLog() {
+async function renderActivityLog(page = 1) {
     loadingCard('Memuat log aktivitas...');
-    
-    // Get activity logs - can filter by calon_penerima_id if needed
-    try {
-        // For now, show system-wide logs (future: add pagination and filters)
-        const response = await api('/logs/calon-penerima/1').catch(() => ({ data: [] }));
-        const logs = response.data ?? [];
 
-        if (!logs.length) {
-            setContent(emptyCard('Tidak ada log aktivitas.'));
-            return;
-        }
+    const modelMap = {
+        'App\\Models\\CalonPenerima': 'Calon Penerima',
+        'App\\Models\\GeneratedLetter': 'Generated Letter',
+        'App\\Models\\DocumentTemplate': 'Document Template',
+    };
+
+    const searchValue = document.getElementById('log-search')?.value?.trim() ?? '';
+    const userValue = document.getElementById('log-user-filter')?.value?.trim() ?? '';
+    const actionValue = document.getElementById('log-action-filter')?.value?.trim() ?? '';
+    const modelValue = document.getElementById('log-model-filter')?.value?.trim() ?? '';
+    const fromValue = document.getElementById('log-date-from')?.value?.trim() ?? '';
+    const toValue = document.getElementById('log-date-to')?.value?.trim() ?? '';
+
+    const query = new URLSearchParams({
+        page: String(page),
+        per_page: '20',
+    });
+
+    if (searchValue) query.set('q', searchValue);
+    if (userValue) query.set('user', userValue);
+    if (actionValue) query.set('action', actionValue);
+    if (modelValue) query.set('model', modelValue);
+    if (fromValue) query.set('date_from', fromValue);
+    if (toValue) query.set('date_to', toValue);
+
+    try {
+        const response = await api(`/logs?${query.toString()}`);
+        const payload = response.data ?? {};
+        const logs = payload.data ?? [];
+        const currentPage = payload.current_page ?? 1;
+        const lastPage = payload.last_page ?? 1;
 
         setContent(`
             <div class="activity-log-container">
-                <div class="log-controls">
-                    <input id="log-search" type="text" placeholder="Cari log..." class="search-input">
-                </div>
-                <div class="log-timeline">
-                    ${logs.map((log, idx) => {
-                        const user = log.user?.name ?? 'System';
-                        const meta = typeof log.meta === 'string' ? log.meta : JSON.stringify(log.meta ?? {});
-                        return `
-                            <div class="log-entry">
-                                <div class="log-dot"></div>
-                                <div class="log-content">
-                                    <div class="log-header">
-                                        <strong>${escapeHtml(log.action)}</strong>
-                                        <small>${escapeHtml(log.created_at ?? '')}</small>
+                <form id="log-filter-form" class="log-controls">
+                    <input id="log-search" type="text" placeholder="Cari action/model..." class="search-input" value="${escapeHtml(searchValue)}">
+                    <input id="log-user-filter" type="number" min="1" placeholder="User ID" class="search-input" value="${escapeHtml(userValue)}">
+                    <input id="log-action-filter" type="text" placeholder="Action" class="search-input" value="${escapeHtml(actionValue)}">
+                    <select id="log-model-filter" class="search-input">
+                        <option value="">Semua Model</option>
+                        <option value="App\\Models\\CalonPenerima" ${modelValue === 'App\\Models\\CalonPenerima' ? 'selected' : ''}>Calon Penerima</option>
+                        <option value="App\\Models\\GeneratedLetter" ${modelValue === 'App\\Models\\GeneratedLetter' ? 'selected' : ''}>Generated Letter</option>
+                        <option value="App\\Models\\DocumentTemplate" ${modelValue === 'App\\Models\\DocumentTemplate' ? 'selected' : ''}>Document Template</option>
+                    </select>
+                    <input id="log-date-from" type="date" class="search-input" value="${escapeHtml(fromValue)}">
+                    <input id="log-date-to" type="date" class="search-input" value="${escapeHtml(toValue)}">
+                    <button class="ghost-button" type="submit">Terapkan Filter</button>
+                </form>
+                ${logs.length ? `
+                    <div class="log-timeline">
+                        ${logs.map((log) => {
+                            const user = log.user?.name ?? 'System';
+                            const created = log.created_at ? new Date(log.created_at).toLocaleString('id-ID') : '-';
+                            const modelLabel = modelMap[log.model_type] ?? log.model_type ?? '-';
+                            const meta = (() => {
+                                if (!log.meta) return '';
+                                const text = JSON.stringify(log.meta, null, 2);
+                                return text === '{}' ? '' : text;
+                            })();
+
+                            return `
+                                <div class="log-entry">
+                                    <div class="log-dot"></div>
+                                    <div class="log-content">
+                                        <div class="log-header">
+                                            <strong>${escapeHtml(log.action ?? '-')}</strong>
+                                            <small>${escapeHtml(created)}</small>
+                                        </div>
+                                        <div class="log-meta">
+                                            <span class="log-user">User: ${escapeHtml(user)}</span>
+                                            <span class="log-model">${escapeHtml(modelLabel)} #${escapeHtml(log.model_id ?? '-')}</span>
+                                        </div>
+                                        ${meta ? `<details class="log-details"><summary>Metadata</summary><code>${escapeHtml(meta)}</code></details>` : ''}
                                     </div>
-                                    <div class="log-meta">
-                                        <span class="log-user">👤 ${escapeHtml(user)}</span>
-                                        ${log.model_type ? `<span class="log-model">${escapeHtml(log.model_type)} #${log.model_id}</span>` : ''}
-                                    </div>
-                                    ${meta && meta !== '{}' ? `<details class="log-details"><summary>Detail</summary><code>${escapeHtml(meta)}</code></details>` : ''}
                                 </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    <div class="doc-row-actions">
+                        <button class="ghost-button" id="log-prev-page" ${currentPage <= 1 ? 'disabled' : ''}>Sebelumnya</button>
+                        <span>Halaman ${currentPage} / ${lastPage}</span>
+                        <button class="ghost-button" id="log-next-page" ${currentPage >= lastPage ? 'disabled' : ''}>Berikutnya</button>
+                    </div>
+                ` : emptyCard('Tidak ada log aktivitas dengan filter saat ini.')}
             </div>
         `);
 
-        const searchInput = document.getElementById('log-search');
-        if (searchInput) {
-            searchInput.addEventListener('input', (e) => {
-                const query = e.target.value.toLowerCase();
-                document.querySelectorAll('.log-entry').forEach(entry => {
-                    const text = entry.textContent.toLowerCase();
-                    entry.style.display = text.includes(query) ? '' : 'none';
-                });
+        const form = document.getElementById('log-filter-form');
+        if (form) {
+            form.addEventListener('submit', (event) => {
+                event.preventDefault();
+                renderActivityLog(1);
             });
+        }
+
+        const prev = document.getElementById('log-prev-page');
+        if (prev) {
+            prev.addEventListener('click', () => renderActivityLog(currentPage - 1));
+        }
+
+        const next = document.getElementById('log-next-page');
+        if (next) {
+            next.addEventListener('click', () => renderActivityLog(currentPage + 1));
         }
     } catch (error) {
         setContent(errorCard('Gagal memuat log: ' + error.message));

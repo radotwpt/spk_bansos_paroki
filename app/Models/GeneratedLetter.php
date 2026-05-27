@@ -12,6 +12,9 @@ class GeneratedLetter extends Model
     protected $table = 'generated_letters';
 
     protected $guarded = ['id'];
+    protected $casts = [
+        'metadata_json' => 'array',
+    ];
 
     public function template()
     {

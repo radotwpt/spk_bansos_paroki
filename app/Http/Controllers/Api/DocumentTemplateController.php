@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Concerns\RespondsWithApi;
 use App\Http\Controllers\Controller;
-use App\Models\CalonPenerima;
+use App\Http\Requests\StoreDocumentTemplateRequest;
+use App\Http\Requests\UpdateDocumentTemplateRequest;
 use App\Models\DocumentTemplate;
+use App\Services\ActivityLogService;
 use App\Services\DocumentService;
 use Illuminate\Http\Request;
 
@@ -13,65 +15,97 @@ class DocumentTemplateController extends Controller
 {
     use RespondsWithApi;
 
-    protected DocumentService $docs;
-
-    public function __construct(DocumentService $docs)
+    public function __construct(
+        protected DocumentService $docs,
+        protected ActivityLogService $logger
+    )
     {
-        $this->docs = $docs;
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        return $this->success(DocumentTemplate::latest()->get(), 'Daftar template dokumen berhasil diambil.');
+        $type = $request->query('type');
+        $q = $request->query('q');
+        $perPage = max(5, min(100, (int) $request->query('per_page', 20)));
+
+        $items = DocumentTemplate::query()
+            ->when($type, fn ($query) => $query->where('type', $type))
+            ->when($q, function ($query) use ($q) {
+                $query->where(function ($inner) use ($q) {
+                    $inner->where('name', 'like', '%'.$q.'%')
+                        ->orWhere('slug', 'like', '%'.$q.'%');
+                });
+            })
+            ->withCount('generatedLetters')
+            ->orderByDesc('updated_at')
+            ->paginate($perPage);
+
+        return $this->success($items, 'Daftar template dokumen berhasil diambil.');
     }
 
-    public function store(Request $request)
+    public function store(StoreDocumentTemplateRequest $request)
     {
-        $data = $request->validate([
-            'name' => 'required|string',
-            'slug' => 'required|string|unique:document_templates,slug',
-            'type' => 'nullable|string',
-            'content' => 'nullable|string',
+        $template = DocumentTemplate::create($request->validated());
+        $this->logger->log('template_created', DocumentTemplate::class, $template->id, $request->user()?->id, [
+            'slug' => $template->slug,
+            'type' => $template->type,
         ]);
 
-        $t = DocumentTemplate::create($data);
-
-        return $this->success($t, 'Template dokumen berhasil dibuat.', 201);
+        return $this->success($template, 'Template dokumen berhasil dibuat.', 201);
     }
 
     public function show($id)
     {
-        return $this->success(DocumentTemplate::findOrFail($id), 'Template dokumen berhasil diambil.');
+        $template = DocumentTemplate::withCount('generatedLetters')->findOrFail($id);
+        return $this->success($template, 'Template dokumen berhasil diambil.');
     }
 
-    public function update(Request $request, $id)
+    public function update(UpdateDocumentTemplateRequest $request, $id)
     {
-        $t = DocumentTemplate::findOrFail($id);
-        $data = $request->validate([
-            'name' => 'sometimes|string',
-            'slug' => 'sometimes|string|unique:document_templates,slug,'.$t->id,
-            'type' => 'nullable|string',
-            'content' => 'nullable|string',
-        ]);
-        $t->update($data);
+        $template = DocumentTemplate::findOrFail($id);
+        $template->update($request->validated());
 
-        return $this->success($t->fresh(), 'Template dokumen berhasil diperbarui.');
+        $this->logger->log('template_updated', DocumentTemplate::class, $template->id, $request->user()?->id, [
+            'slug' => $template->slug,
+            'type' => $template->type,
+        ]);
+
+        return $this->success($template->fresh(), 'Template dokumen berhasil diperbarui.');
     }
 
     public function destroy($id)
     {
-        $t = DocumentTemplate::findOrFail($id);
-        $t->delete();
+        $template = DocumentTemplate::findOrFail($id);
+
+        if ($template->generatedLetters()->exists()) {
+            return $this->error(
+                'Template tidak bisa dihapus karena sudah dipakai surat yang di-generate.',
+                422,
+                ['template' => ['Template sudah direferensikan oleh generated letter.']]
+            );
+        }
+
+        $templateId = $template->id;
+        $meta = [
+            'slug' => $template->slug,
+            'type' => $template->type,
+        ];
+
+        $template->delete();
+        $this->logger->log('template_deleted', DocumentTemplate::class, $templateId, request()->user()?->id, $meta);
 
         return $this->success(null, 'Template dokumen berhasil dihapus.');
     }
 
     public function render(Request $request, $id, $calonId = null)
     {
-        $t = DocumentTemplate::findOrFail($id);
-        $calon = $calonId ? CalonPenerima::find($calonId) : null;
-        $content = $this->docs->renderTemplate($t, $calon, $request->input('extra', []));
+        $template = DocumentTemplate::findOrFail($id);
+        $extra = (array) $request->input('extra', []);
+        $content = $this->docs->renderTemplate($template, null, $extra);
 
-        return $this->success(['content' => $content], 'Template dokumen berhasil dirender.');
+        return $this->success([
+            'content' => $content,
+            'placeholders' => $this->docs->getOfficialPlaceholders(),
+        ], 'Template dokumen berhasil dirender.');
     }
 }

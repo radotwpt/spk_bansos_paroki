@@ -103,5 +103,6 @@ class DatabaseSeeder extends Seeder
 
         // SAW criteria and default global weights
         $this->call(\Database\Seeders\SawCriteriaSeeder::class);
+        $this->call(\Database\Seeders\DocumentTemplateSeeder::class);
     }
 }

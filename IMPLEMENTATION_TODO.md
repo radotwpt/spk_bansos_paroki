@@ -7,6 +7,93 @@ Dokumen ini merangkum semua modul/fitur yang belum diimplementasikan lengkap dan
 
 ---
 
+## Actionable Backlog (Tanpa Estimasi & Tanpa Tanggal)
+
+### Fase 1 - Core API yang Masih Placeholder
+
+- [ ] Implement `POST /api/v1/stasi/surat-permohonan/generate` agar benar-benar membuat data surat.
+- [ ] Implement `PUT /api/v1/stasi/template-surat` agar benar-benar memperbarui template.
+- [ ] Implement `POST /api/v1/paroki/surat-edaran/generate` agar benar-benar membuat data surat.
+- [ ] Implement `PUT /api/v1/paroki/template-edaran` agar benar-benar memperbarui template.
+- [ ] Implement endpoint riwayat stasi/paroki agar tidak lagi return data kosong.
+- [ ] Tambahkan FormRequest untuk validasi endpoint surat/template.
+- [ ] Tambahkan audit log untuk setiap aksi generate/update template.
+
+### Fase 2 - Document & Letter Management Lengkap
+
+- [ ] Tambahkan kolom `nomor_surat` pada `generated_letters` + unique constraint.
+- [ ] Tambahkan kolom `jenis_surat` pada `generated_letters`.
+- [ ] Tambahkan kolom `final_html_content` pada `generated_letters`.
+- [ ] Tambahkan kolom `metadata_json` pada `generated_letters`.
+- [ ] Implement generator nomor surat otomatis per jenis dan tahun.
+- [ ] Tambahkan endpoint `GET /api/v1/letters/next-number`.
+- [ ] Integrasikan placeholder resmi (`nama_periode`, `tahun`, `nama_stasi`, `nomor_surat`, dst).
+- [ ] Implement endpoint preview template dengan sample data.
+- [ ] Implement endpoint arsip surat dengan filter dasar (jenis/periode/tanggal).
+- [ ] Tambahkan proteksi delete template jika sudah digunakan generated letter.
+
+### Fase 3 - Export PDF/CSV/Excel
+
+- [ ] Integrasikan library PDF untuk render surat.
+- [ ] Implement endpoint `GET /api/v1/letters/{id}/pdf`.
+- [ ] Simpan path file hasil PDF ke `generated_letters.file_path`.
+- [ ] Implement endpoint export CSV untuk calon penerima.
+- [ ] Implement endpoint export CSV untuk penerima sah.
+- [ ] Implement endpoint export CSV untuk ranking.
+- [ ] Implement endpoint export Excel untuk report utama.
+- [ ] Standarisasi penamaan file export (`report_{type}_{period}_{date}`).
+
+### Fase 4 - Activity Log & Audit Viewer
+
+- [ ] Tambahkan endpoint global activity log `GET /api/v1/logs`.
+- [ ] Tambahkan filter `user`, `action`, `model`, `date_from`, `date_to` pada log.
+- [ ] Tambahkan pagination pada activity log.
+- [ ] Ubah frontend activity log agar tidak hardcode `calon_penerima_id = 1`.
+- [ ] Tampilkan metadata log dalam format yang mudah dibaca.
+- [ ] Tambahkan policy akses activity log lintas role.
+
+### Fase 5 - Offline/PWA Completion
+
+- [ ] Integrasikan `idb-helpers` ke aplikasi utama, bukan hanya halaman `/pwa`.
+- [ ] Implement indikator online/offline di topbar aplikasi.
+- [ ] Implement queue status: `pending`, `syncing`, `success`, `failed`.
+- [ ] Implement retry manual per item queue.
+- [ ] Implement retry all queue items.
+- [ ] Tambahkan handling error sync khusus (`401`, `409`, `422`, network error).
+- [ ] Tambahkan action sync tambahan jika dibutuhkan selain `submit_candidate`.
+- [ ] Tambahkan offline fallback untuk halaman utama yang krusial.
+
+### Fase 6 - Search, Filter, Pagination Konsisten
+
+- [ ] Standarkan query params list API: `q`, `page`, `per_page`, `sort`, `order`.
+- [ ] Terapkan pagination server-side di seluruh endpoint list utama.
+- [ ] Tambahkan filter ranking by `period_id`, `stasi_id`, `top`, `sort`.
+- [ ] Tambahkan filter generated letters by jenis/periode/pembuat.
+- [ ] Batasi `per_page` maksimum agar endpoint tidak terlalu berat.
+- [ ] Sinkronkan semua kontrol filter frontend dengan query param backend.
+
+### Fase 7 - Security & Validation Hardening
+
+- [ ] Tambahkan endpoint `POST /api/v1/auth/change-password`.
+- [ ] Tambahkan validasi `old_password`, `new_password`, `confirm_password`.
+- [ ] Tambahkan throttle login.
+- [ ] Tambahkan throttle default untuk endpoint API umum.
+- [ ] Pastikan semua endpoint baru mematuhi format error response standar.
+- [ ] Audit policy untuk endpoint documents, reports, export, offline sync.
+- [ ] Pastikan periode terkunci benar-benar memblokir aksi yang tidak boleh.
+
+### Fase 8 - QA, UAT, Dokumentasi
+
+- [ ] Tambahkan test feature untuk modul dokumen/template/surat.
+- [ ] Tambahkan test feature untuk endpoint export/report.
+- [ ] Tambahkan test integrasi alur penuh end-to-end.
+- [ ] Tambahkan test scenario lock period terhadap update bobot/ranking.
+- [ ] Update `README.md` dengan alur setup, flow role, dan endpoint penting.
+- [ ] Sinkronkan `ROADMAP_TODO.md` dan `IMPLEMENTATION_TODO.md` dengan status aktual.
+- [ ] Buat release checklist operasional (migrate, seed, build, test, clear cache).
+
+---
+
 ## Ringkasan Keseluruhan
 
 | Fase | Nama | Priority | Estimasi | Status |
