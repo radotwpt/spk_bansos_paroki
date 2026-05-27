@@ -34,4 +34,26 @@ class CalonPenerimaPolicy
 
         return $this->view($user, $calon);
     }
+
+    public function approve(User $user, CalonPenerima $calon)
+    {
+        if (in_array($user->role ?? '', ['super_admin'])) return true;
+
+        // Only stasi can approve
+        if ($user->role !== 'stasi') return false;
+
+        // Check if from same stasi
+        return $user->stasi_id === $calon->stasi_id;
+    }
+
+    public function reject(User $user, CalonPenerima $calon)
+    {
+        if (in_array($user->role ?? '', ['super_admin'])) return true;
+
+        // Only stasi can reject
+        if ($user->role !== 'stasi') return false;
+
+        // Check if from same stasi
+        return $user->stasi_id === $calon->stasi_id;
+    }
 }

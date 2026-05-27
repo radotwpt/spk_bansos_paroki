@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DocumentTemplateController;
 use App\Http\Controllers\Api\GeneratedLetterController;
 use App\Http\Controllers\Api\KetuaLingkunganParokiController;
+use App\Http\Controllers\Api\SawController;
 use App\Http\Controllers\Api\KetuaLingkunganStasiController;
 use App\Http\Controllers\Api\OfflineSyncController;
 use App\Http\Controllers\Api\ParokiController;
@@ -44,6 +45,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware(['role:ketua_lingkungan_paroki,super_admin'])->prefix('v1/lingkungan-paroki')->group(function () {
         Route::post('/proses-saw/{periodId}', [KetuaLingkunganParokiController::class, 'executeSawRanking']);
         Route::post('/kirim-ke-paroki/{periodId}', [KetuaLingkunganParokiController::class, 'sendRankingToParoki']);
+        // SAW weights and preview
+        Route::get('/saw/weights/{periodId?}', [SawController::class, 'weights']);
+        Route::post('/saw/weights/{periodId?}', [SawController::class, 'saveWeights']);
+        Route::get('/saw/preview/{periodId}', [SawController::class, 'preview']);
+        Route::get('/saw/results/{periodId}', [SawController::class, 'results']);
     });
 
     // Paroki

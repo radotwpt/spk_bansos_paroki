@@ -4,13 +4,17 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Concerns\RespondsWithApi;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreCalonPenerimaRequest;
+use App\Http\Requests\UpdateCalonPenerimaRequest;
 use App\Models\CalonPenerima;
 use App\Models\LingkunganStasi;
 use App\Services\BansosWorkflowService;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 
 class KetuaLingkunganStasiController extends Controller
 {
+    use AuthorizesRequests;
     use RespondsWithApi;
 
     protected BansosWorkflowService $workflow;
@@ -38,21 +42,9 @@ class KetuaLingkunganStasiController extends Controller
         return $this->success($items, 'Daftar calon penerima berhasil diambil.');
     }
 
-    public function store(Request $request)
+    public function store(StoreCalonPenerimaRequest $request)
     {
-        $data = $request->validate([
-            'bansos_period_id' => 'required|exists:bansos_periods,id',
-            'nik' => 'required|string|max:16',
-            'nama_lengkap' => 'required|string|max:150',
-            'alamat_kristen' => 'nullable|string',
-            'pendapatan_keluarga' => 'required|numeric|min:0',
-            'jumlah_tanggungan' => 'required|integer|min:0',
-            'status_tempat_tinggal' => 'required|in:milik_sendiri,sewa,numpang',
-            'status_hubungan' => 'required|in:lajang,menikah,cerai',
-            'urgensi_tambahan_tekstual' => 'nullable|string',
-            'stasi_id' => 'sometimes|exists:stasis,id',
-            'lingkungan_stasi_id' => 'sometimes|exists:lingkungan_stasis,id',
-        ]);
+        $data = $request->validated();
 
         $user = $request->user();
 
@@ -93,19 +85,11 @@ class KetuaLingkunganStasiController extends Controller
         return $this->success($calon, 'Calon penerima berhasil dibuat.', 201);
     }
 
-    public function update(Request $request, $id)
+    public function update(UpdateCalonPenerimaRequest $request, $id)
     {
         $calon = CalonPenerima::findOrFail($id);
         $this->authorize('update', $calon);
-        $data = $request->validate([
-            'nama_lengkap' => 'sometimes|string|max:150',
-            'alamat_kristen' => 'sometimes|nullable|string',
-            'pendapatan_keluarga' => 'sometimes|numeric|min:0',
-            'jumlah_tanggungan' => 'sometimes|integer|min:0',
-            'status_tempat_tinggal' => 'sometimes|in:milik_sendiri,sewa,numpang',
-            'status_hubungan' => 'sometimes|in:lajang,menikah,cerai',
-            'urgensi_tambahan_tekstual' => 'sometimes|nullable|string',
-        ]);
+        $data = $request->validated();
 
         $calon->update($data);
 

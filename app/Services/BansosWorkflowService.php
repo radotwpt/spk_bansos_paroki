@@ -61,7 +61,7 @@ class BansosWorkflowService
 
         $beforeMap = $kandidats->pluck('status_alur', 'id')->toArray();
 
-        $res = $this->sawService->calculate($periodId);
+        $res = $this->sawService->calculate($periodId, $userId, true);
 
         $count = is_countable($res) ? count($res) : null;
 
@@ -88,9 +88,18 @@ class BansosWorkflowService
         return $res;
     }
 
-    public function sendRankingToParoki(int $periodId): bool
+    public function sendRankingToParoki(int $periodId, ?int $userId = null): bool
     {
-        $this->logger->log('ranking_sent_to_paroki', null, $periodId, null, []);
+        $period = \App\Models\BansosPeriod::find($periodId);
+        if (! $period) return false;
+
+        $period->is_locked = true;
+        $period->locked_by = $userId;
+        $period->locked_at = now();
+        $period->save();
+
+        $this->logger->log('ranking_sent_to_paroki', null, $periodId, $userId, ['locked' => true]);
+
         return true;
     }
 

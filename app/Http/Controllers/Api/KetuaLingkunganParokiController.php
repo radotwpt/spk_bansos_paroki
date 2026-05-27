@@ -28,7 +28,8 @@ class KetuaLingkunganParokiController extends Controller
 
     public function sendRankingToParoki(Request $request, $periodId)
     {
-        $ok = $this->workflow->sendRankingToParoki((int) $periodId);
+        $user = $request->user();
+        $ok = $this->workflow->sendRankingToParoki((int) $periodId, $user ? $user->id : null);
 
         return $this->success(['ok' => (bool) $ok], 'Ranking berhasil dikirim ke paroki.');
     }

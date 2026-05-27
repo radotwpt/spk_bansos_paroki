@@ -113,8 +113,9 @@ class UserController extends Controller
             ]);
         }
 
-        if (! empty($data['password'])) {
-            $data['password'] = $data['password'];
+        // if password not provided, remove it from data so it won't be updated
+        if (empty($data['password'])) {
+            unset($data['password']);
         }
 
         $user->update($data);
@@ -126,7 +127,11 @@ class UserController extends Controller
     {
         $user = User::findOrFail($id);
 
-        // allow deletion; if needed add protection later
+        // prevent deletion of super_admin
+        if ($user->role === 'super_admin') {
+            return $this->error('Tidak boleh menghapus user super_admin.', 409);
+        }
+
         $user->delete();
 
         return $this->success(null, 'User berhasil dihapus.');

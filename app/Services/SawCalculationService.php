@@ -3,6 +3,9 @@
 namespace App\Services;
 
 use App\Models\CalonPenerima;
+use App\Models\SawCriterion;
+use App\Models\SawWeight;
+use App\Models\SawResult;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 
@@ -19,7 +22,7 @@ class SawCalculationService
      * Execute SAW calculation for a given period id.
      * Returns a collection of ['id' => ..., 'score' => ...] ordered desc.
      */
-    public function calculate(int $periodId): Collection
+    public function calculate(int $periodId, ?int $userId = null, bool $persist = true): Collection
     {
         $kandidats = CalonPenerima::where('bansos_period_id', $periodId)
             ->whereIn('status_alur', ['diajukan_ke_stasi', 'disetujui_stasi', 'diranking_lingkungan_paroki'])
@@ -29,57 +32,107 @@ class SawCalculationService
             return collect();
         }
 
-        $matrixX = $kandidats->map(function ($item) {
+        // build raw matrix keyed by criterion code
+        $matrix = $kandidats->map(function ($item) {
             return [
                 'id' => $item->id,
-                'c1' => (float) $item->pendapatan_keluarga,
-                'c2' => (float) $item->jumlah_tanggungan,
-                'c3' => $this->mapTempatTinggiToScore($item->status_tempat_tinggal),
-                'c4' => $this->mapStatusHubunganToScore($item->status_hubungan),
+                'c1_pendapatan' => (float) $item->pendapatan_keluarga,
+                'c2_tanggungan' => (float) $item->jumlah_tanggungan,
+                'c3_tempat_tinggal' => $this->mapTempatTinggiToScore($item->status_tempat_tinggal),
+                'c4_status_hubungan' => $this->mapStatusHubunganToScore($item->status_hubungan),
             ];
         });
 
-        $minC1 = $matrixX->min('c1');
-        $maxC2 = $matrixX->max('c2');
-        $maxC3 = $matrixX->max('c3');
-        $maxC4 = $matrixX->max('c4');
+        // load criteria and determine min/max depending on criterion type
+        $criteria = SawCriterion::all()->keyBy('key');
 
-        $minC1 = $minC1 <= 0 ? 1.0 : $minC1;
-        $maxC2 = $maxC2 <= 0 ? 1.0 : $maxC2;
-        $maxC3 = $maxC3 <= 0 ? 1.0 : $maxC3;
-        $maxC4 = $maxC4 <= 0 ? 1.0 : $maxC4;
+        $extents = [];
+        foreach ($criteria as $key => $crit) {
+            $values = $matrix->pluck($key)->map(fn ($v) => (float) $v);
+            if ($crit->type === 'cost') {
+                $min = $values->min();
+                $extents[$key] = $min <= 0 ? 1.0 : $min;
+            } else {
+                $max = $values->max();
+                $extents[$key] = $max <= 0 ? 1.0 : $max;
+            }
+        }
 
-        $calculatedScores = $matrixX->map(function ($row) use ($minC1, $maxC2, $maxC3, $maxC4) {
-            $r1 = $minC1 / ($row['c1'] <= 0 ? 1 : $row['c1']);
-            $r2 = $row['c2'] / $maxC2;
-            $r3 = $row['c3'] / $maxC3;
-            $r4 = $row['c4'] / $maxC4;
+        // load weights (period-specific override global)
+        $weights = $this->getWeightsForPeriod($periodId, $criteria);
 
-            $v = ($this->weights['c1_pendapatan'] * $r1) +
-                 ($this->weights['c2_tanggungan'] * $r2) +
-                 ($this->weights['c3_tempat_tinggal'] * $r3) +
-                 ($this->weights['c4_status_hubungan'] * $r4);
+        // compute normalized and final scores
+        $calculated = $matrix->map(function ($row) use ($criteria, $extents, $weights) {
+            $normalized = [];
+            foreach ($criteria as $key => $crit) {
+                $value = (float) ($row[$key] ?? 0);
+                if ($crit->type === 'cost') {
+                    $den = $value <= 0 ? 1 : $value;
+                    $normalized[$key] = $extents[$key] / $den;
+                } else {
+                    $normalized[$key] = $value / ($extents[$key] ?: 1);
+                }
+            }
+
+            $score = 0.0;
+            foreach ($criteria as $key => $crit) {
+                $w = (float) ($weights[$key] ?? 0);
+                $score += $w * ($normalized[$key] ?? 0);
+            }
 
             return [
                 'id' => $row['id'],
-                'score' => round($v, 4)
+                'raw' => array_filter($row, fn($k) => $k !== 'id', ARRAY_FILTER_USE_KEY),
+                'normalized' => $normalized,
+                'score' => round($score, 4),
             ];
         });
 
-        $rankedItems = $calculatedScores->sortByDesc('score')->values();
+        $rankedItems = $calculated->sortByDesc('score')->values();
 
-        DB::transaction(function () use ($rankedItems) {
-            foreach ($rankedItems as $index => $ranked) {
-                $rankNumber = $index + 1;
-                CalonPenerima::where('id', $ranked['id'])->update([
-                    'saw_score' => $ranked['score'],
-                    'rank_global' => $rankNumber,
-                    'status_alur' => 'diranking_lingkungan_paroki'
-                ]);
-            }
-        });
+        if ($persist) {
+            DB::transaction(function () use ($rankedItems, $weights, $periodId, $userId) {
+                foreach ($rankedItems as $index => $item) {
+                    $rankNumber = $index + 1;
+
+                    // persist saw_result audit
+                    $result = SawResult::updateOrCreate(
+                        ['bansos_period_id' => $periodId, 'calon_penerima_id' => $item['id']],
+                        [
+                            'raw_values' => $item['raw'],
+                            'normalized_values' => $item['normalized'],
+                            'weights_used' => $weights,
+                            'score' => $item['score'],
+                            'rank' => $rankNumber,
+                            'created_by' => $userId,
+                        ]
+                    );
+
+                    // update calon penerima summary
+                    CalonPenerima::where('id', $item['id'])->update([
+                        'saw_score' => $item['score'],
+                        'rank_global' => $rankNumber,
+                        'status_alur' => 'diranking_lingkungan_paroki'
+                    ]);
+                }
+            });
+        }
 
         return $rankedItems;
+    }
+
+    private function getWeightsForPeriod(int $periodId, $criteria): array
+    {
+        $weights = [];
+        foreach ($criteria as $key => $crit) {
+            $w = SawWeight::where('saw_criterion_id', $crit->id)->where('bansos_period_id', $periodId)->first();
+            if (!$w) {
+                $w = SawWeight::where('saw_criterion_id', $crit->id)->whereNull('bansos_period_id')->first();
+            }
+            $weights[$key] = $w ? (float) $w->weight : 0.0;
+        }
+
+        return $weights;
     }
 
     public function mapTempatTinggiToScore(string $value): float

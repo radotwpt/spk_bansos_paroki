@@ -4,12 +4,15 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Concerns\RespondsWithApi;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\RejectCalonPenerimaRequest;
 use App\Models\CalonPenerima;
 use App\Services\BansosWorkflowService;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\Request;
 
 class StasiController extends Controller
 {
+    use AuthorizesRequests;
     use RespondsWithApi;
 
     protected BansosWorkflowService $workflow;
@@ -40,7 +43,7 @@ class StasiController extends Controller
     public function approveByStasi(Request $request, $id)
     {
         $calon = CalonPenerima::findOrFail($id);
-        $this->authorize('update', $calon);
+        $this->authorize('approve', $calon);
 
         $user = $request->user();
         $ok = $this->workflow->approveByStasi((int) $id, $user->id);
@@ -52,14 +55,12 @@ class StasiController extends Controller
         return $this->success(['ok' => true], 'Calon penerima berhasil disetujui stasi.');
     }
 
-    public function rejectByStasi(Request $request, $id)
+    public function rejectByStasi(RejectCalonPenerimaRequest $request, $id)
     {
         $calon = CalonPenerima::findOrFail($id);
-        $this->authorize('update', $calon);
+        $this->authorize('reject', $calon);
 
-        $data = $request->validate([
-            'reason' => 'required|string'
-        ]);
+        $data = $request->validated();
 
         $user = $request->user();
         $ok = $this->workflow->rejectData((int) $id, $data['reason'], $user->id);

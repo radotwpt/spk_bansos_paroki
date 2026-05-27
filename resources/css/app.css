@@ -498,6 +498,32 @@ tr:last-child td {
     }
 }
 
+.form-error-box {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border-radius: 7px;
+    background: #fef2f2;
+    border: 1px solid var(--danger);
+}
+
+.form-error-item {
+    margin: 8px 0;
+    color: var(--danger);
+    font-size: 0.9rem;
+}
+
+.form-error-item:first-child {
+    margin-top: 0;
+}
+
+.form-error-item:last-child {
+    margin-bottom: 0;
+}
+
+.form-error-item strong {
+    font-weight: 700;
+}
+
 @media (max-width: 640px) {
     .auth-screen,
     .workspace {

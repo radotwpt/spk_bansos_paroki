@@ -106,6 +106,33 @@ async function api(path, options = {}) {
 
     return body;
 }
+// Check period lock state and update UI indicator
+async function updatePeriodLockDisplay(periodId) {
+    const indicatorId = 'period-lock-indicator';
+    const existing = document.getElementById(indicatorId);
+    try {
+        const res = await api(`/lingkungan-paroki/saw/weights/${periodId}`);
+        const period = res.period ?? null;
+        const isLocked = !!(period && period.is_locked);
+        if (!document.getElementById('saw-period-id')) return;
+        if (!existing) {
+            const el = document.createElement('span');
+            el.id = indicatorId;
+            el.className = 'lock-indicator';
+            document.getElementById('saw-period-id').parentNode.appendChild(el);
+        }
+        const el = document.getElementById(indicatorId);
+        el.textContent = isLocked ? `🔒 Terkunci oleh ${period.locked_by ?? 'sistem'}` : '🔓 Buka';
+        el.dataset.locked = isLocked ? '1' : '0';
+        // disable weights button when locked
+        const weightsBtn = document.getElementById('saw-weights');
+        if (weightsBtn) weightsBtn.disabled = isLocked;
+        const sendBtn = document.getElementById('saw-send');
+        if (sendBtn) sendBtn.disabled = isLocked;
+    } catch (err) {
+        // ignore, indicator optional
+    }
+}
 
 function setSession(token, user) {
     state.token = token;
@@ -299,21 +326,26 @@ async function showFormModal(cfg, item = null, title = null) {
                 const opts = await loadSelectOptions(f.optionsEndpoint);
                 optionsHtml = opts.map(o => `<option value="${o.id}" ${String(value) === String(o.id) ? 'selected' : ''}>${escapeHtml(o[f.optionLabel] ?? o.name ?? o.id)}</option>`).join('');
             }
-            return `<label>${escapeHtml(f.label)}<select name="${escapeHtml(f.name)}">${optionsHtml}</select></label>`;
+            const fieldHtml = `<label data-field-name="${escapeHtml(f.name)}" class="form-field-label">${escapeHtml(f.label)}<select name="${escapeHtml(f.name)}" ${f.required ? 'required' : ''}>${optionsHtml}</select></label>`;
+            return { html: fieldHtml, field: f };
         }
 
         if (f.type === 'textarea') {
-            return `<label>${escapeHtml(f.label)}<textarea name="${escapeHtml(f.name)}">${escapeHtml(value)}</textarea></label>`;
+            const fieldHtml = `<label data-field-name="${escapeHtml(f.name)}" class="form-field-label">${escapeHtml(f.label)}<textarea name="${escapeHtml(f.name)}" ${f.required ? 'required' : ''}>${escapeHtml(value)}</textarea></label>`;
+            return { html: fieldHtml, field: f };
         }
 
-        return `<label>${escapeHtml(f.label)}<input name="${escapeHtml(f.name)}" type="${escapeHtml(f.type)}" value="${escapeHtml(value)}"></label>`;
+        const fieldHtml = `<label data-field-name="${escapeHtml(f.name)}" class="form-field-label">${escapeHtml(f.label)}<input name="${escapeHtml(f.name)}" type="${escapeHtml(f.type)}" value="${escapeHtml(value)}" ${f.required ? 'required' : ''}>${f.note ? `<small>${escapeHtml(f.note)}</small>` : ''}</label>`;
+        return { html: fieldHtml, field: f };
     }));
+
+    const fieldParts = fieldsHtmlParts.filter(fp => fp !== null);
 
     wrapper.innerHTML = `
         <div class="modal-card modal-form-card">
             <h3>${escapeHtml(title)}</h3>
             <form id="modal-form" class="data-form">
-                <div class="form-grid">${fieldsHtmlParts.join('')}</div>
+                <div class="form-grid">${fieldParts.map(fp => fp.html).join('')}</div>
                 <div class="modal-actions">
                     <button type="button" class="ghost-button cancel">Batal</button>
                     <button type="submit" class="primary-button submit">Simpan</button>
@@ -325,12 +357,36 @@ async function showFormModal(cfg, item = null, title = null) {
     root.appendChild(wrapper);
 
     return await new Promise((resolve) => {
+        const form = wrapper.querySelector('#modal-form');
+        let formData = {};
+
+        // update conditional visibility on change
+        const updateConditionalFields = () => {
+            formData = Object.fromEntries(new FormData(form).entries());
+            fieldParts.forEach(fp => {
+                const label = wrapper.querySelector(`label[data-field-name="${fp.field.name}"]`);
+                if (label) {
+                    if (fp.field.showWhen) {
+                        label.style.display = fp.field.showWhen(formData) ? '' : 'none';
+                    }
+                }
+            });
+        };
+
+        // attach change listener to role field for conditional visibility
+        const roleField = form.querySelector('select[name="role"]');
+        if (roleField) {
+            roleField.addEventListener('change', updateConditionalFields);
+        }
+
+        // initial visibility update
+        updateConditionalFields();
+
         wrapper.querySelector('.cancel').addEventListener('click', () => {
             wrapper.remove();
             resolve(null);
         });
 
-        const form = wrapper.querySelector('#modal-form');
         form.addEventListener('submit', (e) => {
             e.preventDefault();
             const data = Object.fromEntries(new FormData(form).entries());
@@ -418,11 +474,18 @@ async function renderSaw() {
             <div class="form-inline">
                 <label>Periode ID<input id="saw-period-id" type="number" min="1" value="1"></label>
                 <button id="saw-run" class="primary-button">Jalankan SAW</button>
+                <button id="saw-preview" class="ghost-button">Preview</button>
+                <button id="saw-weights" class="ghost-button">Atur Bobot</button>
+                <button id="saw-results" class="ghost-button">Lihat Hasil (Audit)</button>
                 <button id="saw-send" class="ghost-button">Kirim ke Paroki</button>
             </div>
             <div id="saw-result" class="mt-4"></div>
         </section>
     `);
+    // update lock indicator whenever period changes
+    const periodInput = document.getElementById('saw-period-id');
+    periodInput.addEventListener('input', () => updatePeriodLockDisplay(Number(periodInput.value || 0)));
+    updatePeriodLockDisplay(Number(periodInput.value || 0));
 
     document.getElementById('saw-run').addEventListener('click', async (e) => {
         const periodId = Number(document.getElementById('saw-period-id').value || 0);
@@ -449,6 +512,119 @@ async function renderSaw() {
             showToast('error', formatApiError(err));
         } finally {
             restore();
+        }
+    });
+
+    document.getElementById('saw-preview').addEventListener('click', async () => {
+        const periodId = Number(document.getElementById('saw-period-id').value || 0);
+        if (!periodId) return setStatus('error', 'Periode tidak valid.');
+        const btn = document.getElementById('saw-preview');
+        const restore = setButtonLoading(btn, 'Mempersiapkan preview...');
+        try {
+            const res = await api(`/lingkungan-paroki/saw/preview/${periodId}`);
+            const rows = res.preview ?? [];
+            const html = `
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Rank</th><th>ID</th><th>Score</th></tr></thead>
+                        <tbody>
+                            ${rows.map((r, i) => `<tr><td>${i+1}</td><td>${r.id}</td><td>${r.score}</td></tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            document.getElementById('saw-result').innerHTML = html;
+            showToast('info', 'Preview perankingan siap. Preview tidak menyimpan hasil.');
+        } catch (err) {
+            setStatus('error', formatApiError(err));
+            showToast('error', formatApiError(err));
+        } finally {
+            restore();
+        }
+    });
+
+    document.getElementById('saw-weights').addEventListener('click', async () => {
+        const periodId = Number(document.getElementById('saw-period-id').value || 0) || null;
+        try {
+            const res = await api(`/lingkungan-paroki/saw/weights/${periodId ?? ''}`);
+            const criteria = res.criteria ?? [];
+            // build modal form
+            const formHtml = `
+                <form id="saw-weights-form">
+                    <div class="form-grid">
+                        ${criteria.map(c => `
+                            <label>${escapeHtml(c.label)}<input name="${escapeHtml(c.key)}" type="number" step="0.0001" min="0" max="1" value="${escapeHtml(String(c.weight))}"></label>
+                        `).join('')}
+                    </div>
+                    <div class="modal-actions"><button type="button" class="ghost-button cancel">Batal</button><button type="submit" class="primary-button">Simpan</button></div>
+                </form>
+            `;
+            ensureUiContainers();
+            const root = document.getElementById('ui-modal-root');
+            const wrapper = document.createElement('div');
+            wrapper.className = 'modal-backdrop';
+            wrapper.innerHTML = `<div class="modal-card"><h3>Atur Bobot (Periode: ${escapeHtml(res.period?.nama_periode ?? 'global')})</h3>${formHtml}</div>`;
+            root.appendChild(wrapper);
+
+            wrapper.querySelector('.cancel').addEventListener('click', () => wrapper.remove());
+            const submitBtn = wrapper.querySelector('button[type=submit]');
+            if (res.period && res.period.is_locked) {
+                if (submitBtn) submitBtn.disabled = true;
+                const warn = document.createElement('div'); warn.className = 'state-card warning'; warn.textContent = 'Periode terkunci — bobot tidak dapat diubah.'; wrapper.querySelector('.modal-card').insertAdjacentElement('afterbegin', warn);
+            }
+
+            wrapper.querySelector('#saw-weights-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const data = Object.fromEntries(new FormData(e.target).entries());
+                // sum check
+                const weights = {};
+                Object.keys(data).forEach(k => weights[k] = Number(data[k]));
+                const total = Object.values(weights).reduce((a,b) => a + b, 0);
+                if (Math.abs(total - 1.0) > 0.0001) return alert('Total bobot harus berjumlah 1.0');
+                try {
+                    await api(`/lingkungan-paroki/saw/weights/${periodId ?? ''}`, { method: 'POST', body: JSON.stringify({ weights }) });
+                    showToast('success', 'Bobot disimpan');
+                    wrapper.remove();
+                } catch (err) {
+                    showToast('error', formatApiError(err));
+                }
+            });
+
+        } catch (err) {
+            showToast('error', formatApiError(err));
+        }
+    });
+
+    document.getElementById('saw-results').addEventListener('click', async () => {
+        const periodId = Number(document.getElementById('saw-period-id').value || 0);
+        if (!periodId) return setStatus('error', 'Periode tidak valid.');
+        try {
+            const res = await api(`/lingkungan-paroki/saw/results/${periodId}`);
+            const rows = res.data ?? [];
+            const html = `
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr><th>Rank</th><th>Nama</th><th>Score</th><th>Weights</th><th>By</th><th>Time</th></tr></thead>
+                        <tbody>
+                            ${rows.map(r => {
+                                const by = (r.createdBy && r.createdBy.name) || (r.created_by && r.created_by.name) || 'System';
+                                const weights = r.weights_used ?? r.weightsUsed ?? {};
+                                return `<tr>
+                                    <td>${escapeHtml(String(r.rank ?? '-'))}</td>
+                                    <td>${escapeHtml(r.calon?.nama_lengkap ?? '-')}</td>
+                                    <td>${escapeHtml(String(r.score ?? '0.0000'))}</td>
+                                    <td>${escapeHtml(JSON.stringify(weights))}</td>
+                                    <td>${escapeHtml(by)}</td>
+                                    <td>${escapeHtml(r.created_at ?? '')}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            document.getElementById('saw-result').innerHTML = html;
+        } catch (err) {
+            showToast('error', formatApiError(err));
         }
     });
 
@@ -615,6 +791,7 @@ const MASTER_CONFIG = {
         columns: [
             { key: 'nama_periode', label: 'Nama Periode' },
             { key: 'tahun', label: 'Tahun' },
+            { key: 'is_locked', label: 'Terkunci' },
             { key: 'status_periode', label: 'Status' },
         ],
         fields: [
@@ -639,7 +816,7 @@ const MASTER_CONFIG = {
         fields: [
             { name: 'name', label: 'Nama', type: 'text', required: true },
             { name: 'email', label: 'Email', type: 'email', required: true },
-            { name: 'password', label: 'Password', type: 'password', required: false },
+            { name: 'password', label: 'Password', type: 'password', required: false, note: 'Kosongkan jika tidak ingin mengubah password' },
             { name: 'role', label: 'Role', type: 'select', options: [
                 { value: 'super_admin', label: 'Super Admin' },
                 { value: 'paroki', label: 'Paroki' },
@@ -647,9 +824,9 @@ const MASTER_CONFIG = {
                 { value: 'stasi', label: 'Stasi' },
                 { value: 'ketua_lingkungan_stasi', label: 'Ketua Lingkungan Stasi' },
             ], required: true },
-            { name: 'stasi_id', label: 'Stasi', type: 'select', optionsEndpoint: '/master/stasis', optionLabel: 'nama_stasi', required: false },
-            { name: 'lingkungan_paroki_id', label: 'Lingkungan Paroki', type: 'select', optionsEndpoint: '/master/lingkungan-parokis', optionLabel: 'nama_lingkungan_paroki', required: false },
-            { name: 'lingkungan_stasi_id', label: 'Lingkungan Stasi', type: 'select', optionsEndpoint: '/master/lingkungan-stasis', optionLabel: 'nama_lingkungan_stasi', required: false },
+            { name: 'stasi_id', label: 'Stasi', type: 'select', optionsEndpoint: '/master/stasis', optionLabel: 'nama_stasi', required: false, showWhen: (formData) => ['stasi', 'ketua_lingkungan_stasi'].includes(formData.role) },
+            { name: 'lingkungan_paroki_id', label: 'Lingkungan Paroki', type: 'select', optionsEndpoint: '/master/lingkungan-parokis', optionLabel: 'nama_lingkungan_paroki', required: false, showWhen: (formData) => formData.role === 'ketua_lingkungan_paroki' },
+            { name: 'lingkungan_stasi_id', label: 'Lingkungan Stasi', type: 'select', optionsEndpoint: '/master/lingkungan-stasis', optionLabel: 'nama_lingkungan_stasi', required: false, showWhen: (formData) => formData.role === 'ketua_lingkungan_stasi' },
         ],
     },
 };
@@ -710,10 +887,15 @@ async function fetchMasterPage(resource) {
 
 function renderTableRowFor(cfg, item) {
     const cells = cfg.columns.map(col => {
+        if (col.key === 'is_locked') {
+            return `<td><span class="status-pill ${item[col.key] ? 'locked' : 'open'}">${escapeHtml(item[col.key] ? 'Terkunci' : 'Aktif')}</span></td>`;
+        }
+
         if (col.key.endsWith('_id')) {
             const val = item[col.key];
             return `<td>${escapeHtml(val ?? '-')}</td>`;
         }
+
         return `<td>${escapeHtml(item[col.key] ?? '-')}</td>`;
     }).join('');
 
@@ -989,15 +1171,17 @@ async function renderCandidateList(path, emptyMessage) {
 function renderCandidateForm() {
     setContent(`
         <form id="candidate-form" class="data-form">
+            <div id="form-error-container"></div>
             <div class="form-grid">
                 <label>Periode ID<input name="bansos_period_id" type="number" min="1" value="1" required></label>
-                <label>NIK<input name="nik" maxlength="16" required></label>
+                <label>NIK<input name="nik" maxlength="16" minlength="16" inputmode="numeric" placeholder="16 digit NIK" required></label>
                 <label>Nama Lengkap<input name="nama_lengkap" required></label>
                 <label>Alamat<input name="alamat_kristen"></label>
                 <label>Pendapatan Keluarga<input name="pendapatan_keluarga" type="number" min="0" required></label>
                 <label>Jumlah Tanggungan<input name="jumlah_tanggungan" type="number" min="0" value="0" required></label>
                 <label>Status Tempat Tinggal
                     <select name="status_tempat_tinggal" required>
+                        <option value="">-- Pilih --</option>
                         <option value="milik_sendiri">Milik Sendiri</option>
                         <option value="sewa">Sewa</option>
                         <option value="numpang">Numpang</option>
@@ -1005,6 +1189,7 @@ function renderCandidateForm() {
                 </label>
                 <label>Status Hubungan
                     <select name="status_hubungan" required>
+                        <option value="">-- Pilih --</option>
                         <option value="lajang">Lajang</option>
                         <option value="menikah">Menikah</option>
                         <option value="cerai">Cerai</option>
@@ -1019,6 +1204,8 @@ function renderCandidateForm() {
     document.getElementById('candidate-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         setStatus('loading', 'Menyimpan calon penerima...');
+        const errorContainer = document.getElementById('form-error-container');
+        errorContainer.innerHTML = '';
 
         const payload = Object.fromEntries(new FormData(event.target).entries());
         payload.bansos_period_id = Number(payload.bansos_period_id);
@@ -1031,9 +1218,27 @@ function renderCandidateForm() {
                 body: JSON.stringify(payload),
             });
             event.target.reset();
+            errorContainer.innerHTML = '';
             setStatus('success', 'Calon penerima berhasil disimpan sebagai draft.');
+            showToast('success', 'Calon penerima berhasil disimpan sebagai draft.');
         } catch (error) {
+            setStatus('', '');
+            
+            // Display field-level validation errors
+            const errors = error.body?.errors;
+            if (errors && typeof errors === 'object') {
+                const errorHtml = Object.entries(errors)
+                    .map(([field, messages]) => {
+                        const msgs = Array.isArray(messages) ? messages : [messages];
+                        return `<div class="form-error-item"><strong>${escapeHtml(field)}:</strong> ${escapeHtml(msgs.join(', '))}</div>`;
+                    })
+                    .join('');
+                
+                errorContainer.innerHTML = `<div class="form-error-box">${errorHtml}</div>`;
+            }
+            
             setStatus('error', formatApiError(error));
+            showToast('error', formatApiError(error));
         }
     });
 }

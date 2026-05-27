@@ -100,5 +100,8 @@ class DatabaseSeeder extends Seeder
             'lingkungan_stasi_id' => null,
             'lingkungan_paroki_id' => $lingkunganParoki->id,
         ]);
+
+        // SAW criteria and default global weights
+        $this->call(\Database\Seeders\SawCriteriaSeeder::class);
     }
 }
