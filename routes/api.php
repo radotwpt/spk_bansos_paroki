@@ -75,6 +75,14 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Ketua Lingkungan Paroki
     Route::middleware(['role:ketua_lingkungan_paroki,super_admin'])->prefix('v1/lingkungan-paroki')->group(function () {
+        // Dashboard & Reporting
+        Route::get('/dashboard', [KetuaLingkunganParokiController::class, 'dashboard']);
+        Route::get('/ranking-list', [KetuaLingkunganParokiController::class, 'rankingList']);
+        Route::get('/saw-details/{candidateId}', [KetuaLingkunganParokiController::class, 'sawDetails']);
+        Route::get('/activity-logs', [KetuaLingkunganParokiController::class, 'activityLogs']);
+        Route::get('/reporting-summary', [KetuaLingkunganParokiController::class, 'reportingSummary']);
+        
+        // SAW Processing
         Route::post('/proses-saw/{periodId}', [KetuaLingkunganParokiController::class, 'executeSawRanking']);
         Route::post('/kirim-ke-paroki/{periodId}', [KetuaLingkunganParokiController::class, 'sendRankingToParoki']);
         // SAW weights and preview

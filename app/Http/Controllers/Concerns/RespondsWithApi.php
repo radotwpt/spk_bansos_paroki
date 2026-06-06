@@ -3,21 +3,38 @@
 namespace App\Http\Controllers\Concerns;
 
 use Illuminate\Http\JsonResponse;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 trait RespondsWithApi
 {
-    protected function success(mixed $data = null, string $message = 'Berhasil.', int $status = 200): JsonResponse
+    protected function success(
+        mixed $data = null,
+        string $message = 'Berhasil.',
+        int $status = 200,
+        array $meta = []
+    ): JsonResponse
     {
-        return response()->json([
+        $payload = [
+            'success' => true,
+            'code' => $status,
             'message' => $message,
             'data' => $data,
-        ], $status);
+        ];
+
+        if (! empty($meta)) {
+            $payload['meta'] = $meta;
+        }
+
+        return response()->json($payload, $status);
     }
 
     protected function error(string $message, int $status = 400, mixed $errors = null): JsonResponse
     {
         $payload = [
+            'success' => false,
+            'code' => $status,
             'message' => $message,
+            'data' => null,
         ];
 
         if ($errors !== null) {
@@ -25,5 +42,22 @@ trait RespondsWithApi
         }
 
         return response()->json($payload, $status);
+    }
+
+    protected function paginated(
+        LengthAwarePaginator $paginator,
+        mixed $data,
+        string $message = 'Data berhasil diambil.'
+    ): JsonResponse {
+        return $this->success($data, $message, 200, [
+            'pagination' => [
+                'current_page' => $paginator->currentPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'last_page' => $paginator->lastPage(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
+        ]);
     }
 }

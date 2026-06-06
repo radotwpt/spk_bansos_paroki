@@ -6,6 +6,7 @@ use Illuminate\Foundation\Support\Providers\AuthServiceProvider as ServiceProvid
 use Illuminate\Support\Facades\Gate;
 use App\Models\ActivityLog;
 use App\Models\CalonPenerima;
+use App\Models\User;
 use App\Policies\ActivityLogPolicy;
 use App\Policies\CalonPenerimaPolicy;
 
@@ -19,5 +20,9 @@ class AuthServiceProvider extends ServiceProvider
     public function boot()
     {
         $this->registerPolicies();
+
+        Gate::define('manage-master-data', function (User $user) {
+            return $user->role === 'super_admin';
+        });
     }
 }

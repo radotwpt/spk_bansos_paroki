@@ -6,6 +6,7 @@ use App\Http\Controllers\Concerns\RespondsWithApi;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Master\StoreStasiRequest;
 use App\Http\Requests\Master\UpdateStasiRequest;
+use App\Http\Resources\StasiResource;
 use App\Models\Stasi;
 use Illuminate\Http\Request;
 
@@ -15,8 +16,14 @@ class StasiController extends Controller
 
     public function index(Request $request)
     {
-        $q = $request->query('q');
-        $perPage = (int) $request->query('per_page', 15);
+        $this->authorize('manage-master-data');
+
+        $q = trim((string) $request->query('q', ''));
+        $perPage = max(5, min(100, (int) $request->query('per_page', 15)));
+        $sort = (string) $request->query('sort', 'nama_stasi');
+        $order = strtolower((string) $request->query('order', 'asc')) === 'desc' ? 'desc' : 'asc';
+        $allowedSorts = ['nama_stasi', 'kode_stasi', 'created_at', 'updated_at'];
+        $sort = in_array($sort, $allowedSorts, true) ? $sort : 'nama_stasi';
 
         $query = Stasi::query();
 
@@ -27,35 +34,43 @@ class StasiController extends Controller
             });
         }
 
-        $items = $query->orderBy('nama_stasi')->paginate($perPage);
+        $items = $query->orderBy($sort, $order)->paginate($perPage)->withQueryString();
 
-        return $this->success($items, 'Daftar stasi diambil.');
+        return $this->paginated($items, StasiResource::collection($items->items()), 'Daftar stasi diambil.');
     }
 
     public function store(StoreStasiRequest $request)
     {
+        $this->authorize('manage-master-data');
+
         $stasi = Stasi::create($request->validated());
 
-        return $this->success($stasi, 'Stasi berhasil dibuat.', 201);
+        return $this->success(new StasiResource($stasi), 'Stasi berhasil dibuat.', 201);
     }
 
     public function show($id)
     {
+        $this->authorize('manage-master-data');
+
         $stasi = Stasi::findOrFail($id);
 
-        return $this->success($stasi);
+        return $this->success(new StasiResource($stasi), 'Detail stasi diambil.');
     }
 
     public function update(UpdateStasiRequest $request, $id)
     {
+        $this->authorize('manage-master-data');
+
         $stasi = Stasi::findOrFail($id);
         $stasi->update($request->validated());
 
-        return $this->success($stasi->fresh(), 'Stasi berhasil diperbarui.');
+        return $this->success(new StasiResource($stasi->fresh()), 'Stasi berhasil diperbarui.');
     }
 
     public function destroy(Request $request, $id)
     {
+        $this->authorize('manage-master-data');
+
         $stasi = Stasi::findOrFail($id);
 
         if ($stasi->lingkunganStasis()->exists() || $stasi->users()->exists() || $stasi->calonPenerimas()->exists()) {

@@ -1,241 +1,209 @@
 <!doctype html>
 <html lang="id">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#174E4A" />
-    <meta name="description" content="SPK Bansos - Sistem Pendukung Keputusan Bantuan Sosial" />
-    <title>SPK Bansos - Sistem Pendukung Keputusan</title>
-    <link rel="manifest" href="/manifest.json">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%23174e4a' width='100' height='100' rx='20'/><text x='50' y='70' font-size='60' font-weight='bold' fill='white' text-anchor='middle' font-family='sans-serif'>S</text></svg>">
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
-  </head>
-  <body>
-    <div id="app" class="app-root" data-api-base="/api/v1">
-      <!-- ====== LOGIN SCREEN ====== -->
-      <section id="login-screen" class="auth-screen" aria-labelledby="login-title">
-        <div class="auth-panel">
-          <div class="flex items-center gap-4 mb-8">
-            <div class="brand-mark">
-              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-              </svg>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#174E4A">
+  <meta name="description" content="SPK Bansos - Sistem Pendukung Keputusan Bantuan Sosial">
+  <title>SPK Bansos - Sistem Pendukung Keputusan</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%23174e4a' width='100' height='100' rx='20'/><text x='50' y='70' font-size='60' font-weight='bold' fill='white' text-anchor='middle' font-family='sans-serif'>S</text></svg>">
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  @vite(['resources/css/app.css', 'resources/js/app-modern.js'])
+</head>
+<body>
+  <div id="app" class="app-root" data-api-base="/api/v1">
+    <!-- ====== LOGIN SCREEN ====== -->
+    <div id="login-screen" class="auth-screen">
+      <div class="auth-panel">
+        <div class="mb-4">
+          <div class="d-flex align-items-center" style="gap: 1rem; margin-bottom: 1rem;">
+            <div style="width: 56px; height: 56px; background: linear-gradient(135deg, #174e4a 0%, #0d3734 100%); border-radius: 0.5rem; display: flex; align-items: center; justify-content: center; color: white; font-size: 1.75rem;">
+              <i class="bi bi-graph-up"></i>
             </div>
             <div>
-              <h1 class="text-2xl font-bold text-neutral-900">SPK Bansos</h1>
-              <p class="text-sm text-neutral-500">Sistem Pendukung Keputusan</p>
+              <h1 class="h4 mb-0 fw-bold text-primary">SPK Bansos</h1>
+              <small class="text-muted">Sistem Pendukung Keputusan</small>
             </div>
-          </div>
-
-          <div class="space-y-2 mb-6">
-            <h2 id="login-title" class="text-xl font-semibold text-neutral-900">Masuk ke Akun Anda</h2>
-            <p class="text-sm text-neutral-600">Kelola pendataan, verifikasi, ranking, dan keputusan bantuan sosial dengan mudah.</p>
-          </div>
-
-          <form id="login-form" class="auth-form space-y-4" novalidate>
-            <div class="form-group">
-              <label for="login-email" class="block text-sm font-medium text-neutral-700 mb-2">Email Address</label>
-              <input 
-                id="login-email" 
-                name="email" 
-                type="email" 
-                autocomplete="email" 
-                value="test@example.com" 
-                class="input" 
-                placeholder="nama@contoh.com"
-                required 
-              />
-            </div>
-
-            <div class="form-group">
-              <label for="login-password" class="block text-sm font-medium text-neutral-700 mb-2">Password</label>
-              <input 
-                id="login-password" 
-                name="password" 
-                type="password" 
-                autocomplete="current-password" 
-                value="password" 
-                class="input" 
-                placeholder="••••••••"
-                required 
-              />
-            </div>
-
-            <div class="flex items-center justify-between text-sm">
-              <label class="flex items-center gap-2">
-                <input type="checkbox" class="w-4 h-4 rounded border-neutral-300" />
-                <span class="text-neutral-700">Ingat saya</span>
-              </label>
-              <a href="#" class="text-primary-600 hover:text-primary-700">Lupa password?</a>
-            </div>
-
-            <p id="login-error" class="form-error hidden" role="alert"></p>
-            
-            <button id="login-submit" class="btn-primary w-full" type="submit">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v2a2 2 0 01-2 2H7a2 2 0 01-2-2v-2m14-4V5a2 2 0 00-2-2H7a2 2 0 00-2 2v4m14 0a2 2 0 01-2 2H7a2 2 0 01-2-2m14 0V5a2 2 0 00-2-2H7a2 2 0 00-2 2v4"/>
-              </svg>
-              Masuk ke Aplikasi
-            </button>
-          </form>
-
-          <div class="border-t border-neutral-200 pt-6">
-            <p class="text-xs text-neutral-600 font-medium uppercase tracking-wider mb-3">Akun Demo untuk Testing</p>
-            <div class="grid grid-cols-2 gap-2" aria-label="Demo accounts">
-              <button class="demo-user text-xs" type="button" data-email="admin@example.com" title="Full access">
-                <span class="block font-semibold">Admin</span>
-                <span class="text-xs text-neutral-500">Super Admin</span>
-              </button>
-              <button class="demo-user text-xs" type="button" data-email="test@example.com" title="Head of Stasi">
-                <span class="block font-semibold">Ketua Stasi</span>
-                <span class="text-xs text-neutral-500">Stasi Head</span>
-              </button>
-              <button class="demo-user text-xs" type="button" data-email="stasi@example.com" title="Stasi staff">
-                <span class="block font-semibold">Stasi</span>
-                <span class="text-xs text-neutral-500">Staff</span>
-              </button>
-              <button class="demo-user text-xs" type="button" data-email="ketua.paroki@example.com" title="Head of Parish">
-                <span class="block font-semibold">Ketua Paroki</span>
-                <span class="text-xs text-neutral-500">Parish Head</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="mt-6 p-4 rounded-lg bg-primary-50 border border-primary-200">
-            <p class="text-xs text-primary-700">
-              <strong>💡 Tip:</strong> Gunakan kredensial demo untuk mengeksplorasi sistem dengan peran yang berbeda.
-            </p>
           </div>
         </div>
-      </section>
 
-      <!-- ====== MAIN SHELL ====== -->
-      <section id="shell-screen" class="shell" hidden>
-        <!-- SIDEBAR -->
-        <aside class="sidebar" aria-label="Navigasi utama" id="sidebar-nav">
-          <div class="sidebar-brand">
-            <span class="brand-mark compact">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002 2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
-              </svg>
-            </span>
-            <div>
-              <strong class="text-neutral-900 block">SPK Bansos</strong>
-              <small id="sidebar-role" class="text-neutral-500">Loading...</small>
+        <div class="mb-4">
+          <h2 class="h5 fw-bold mb-2">Masuk ke Akun Anda</h2>
+          <p class="text-muted mb-0">Masukkan email dan password untuk melanjutkan.</p>
+        </div>
+
+        <form id="login-form" class="needs-validation" novalidate>
+          <div class="mb-3">
+            <label for="login-email" class="form-label">Email Address</label>
+            <input type="email" class="form-control" id="login-email" name="email" value="test@example.com" placeholder="nama@contoh.com" required>
+          </div>
+
+          <div class="mb-3">
+            <label for="login-password" class="form-label">Password</label>
+            <input type="password" class="form-control" id="login-password" name="password" value="password" placeholder="••••••••" required>
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mb-3 small">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="remember" name="remember">
+              <label class="form-check-label" for="remember">Ingat saya</label>
+            </div>
+            <a href="#" class="text-decoration-none">Lupa password?</a>
+          </div>
+
+          <div id="login-error" class="alert alert-danger d-none" role="alert">
+            <i class="bi bi-exclamation-circle me-2"></i>
+            <span id="error-text"></span>
+          </div>
+
+          <button type="submit" id="login-submit" class="btn btn-primary w-100 fw-bold mb-3">
+            <i class="bi bi-box-arrow-in-right me-2"></i>Masuk ke Aplikasi
+          </button>
+        </form>
+
+        <hr class="my-3">
+
+        <div class="mb-3">
+          <p class="eyebrow">Akun Demo untuk Testing</p>
+          <div class="row g-2">
+            <div class="col-6">
+              <button class="btn btn-outline-primary btn-sm w-100 demo-user" type="button" data-email="admin@example.com" style="text-align: left;">
+                <div class="fw-bold">Admin</div>
+                <small class="text-muted d-block">Super Admin</small>
+              </button>
+            </div>
+            <div class="col-6">
+              <button class="btn btn-outline-primary btn-sm w-100 demo-user" type="button" data-email="test@example.com" style="text-align: left;">
+                <div class="fw-bold">Ketua Stasi</div>
+                <small class="text-muted d-block">Stasi Head</small>
+              </button>
+            </div>
+            <div class="col-6">
+              <button class="btn btn-outline-primary btn-sm w-100 demo-user" type="button" data-email="stasi@example.com" style="text-align: left;">
+                <div class="fw-bold">Stasi</div>
+                <small class="text-muted d-block">Staff</small>
+              </button>
+            </div>
+            <div class="col-6">
+              <button class="btn btn-outline-primary btn-sm w-100 demo-user" type="button" data-email="ketua.paroki@example.com" style="text-align: left;">
+                <div class="fw-bold">Ketua Paroki</div>
+                <small class="text-muted d-block">Parish Head</small>
+              </button>
             </div>
           </div>
-          
-          <nav id="main-menu" class="main-menu" role="navigation">
-            <!-- Menu items akan diisi via JavaScript -->
-          </nav>
+        </div>
 
-          <div class="border-t border-neutral-200 p-4 mt-auto">
-            <p class="text-xs font-semibold text-neutral-600 uppercase tracking-wider mb-3">Informasi</p>
-            <div class="space-y-2 text-xs text-neutral-600">
-              <div>
-                <p class="font-medium">Versi Aplikasi</p>
-                <p>1.0.0</p>
-              </div>
-              <div>
-                <p class="font-medium">Database</p>
-                <p id="db-status" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-success-500 inline-block"></span> Connected</p>
-              </div>
-            </div>
-          </div>
-        </aside>
-
-        <!-- MAIN WORKSPACE -->
-        <main class="workspace">
-          <!-- TOPBAR -->
-          <header class="topbar" role="banner">
-            <div class="flex items-center gap-4 flex-1 min-w-0">
-              <button 
-                id="menu-toggle" 
-                class="btn-ghost" 
-                type="button" 
-                aria-label="Toggle sidebar"
-                aria-expanded="false"
-              >
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-                </svg>
-              </button>
-
-              <div class="flex-1 min-w-0">
-                <p class="eyebrow">Dashboard</p>
-                <h2 id="page-title" class="text-2xl font-bold text-neutral-900 truncate">Ringkasan</h2>
-              </div>
-            </div>
-
-            <!-- TOPBAR RIGHT -->
-            <div class="flex items-center gap-4">
-              <!-- Search -->
-              <div class="hidden md:flex relative">
-                <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                </svg>
-                <input 
-                  type="search" 
-                  id="topbar-search" 
-                  placeholder="Cari..." 
-                  class="pl-9 pr-4 py-2 text-sm border border-neutral-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-
-              <!-- Notifications -->
-              <button class="btn-ghost relative" type="button" aria-label="Notifications">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
-                </svg>
-                <span class="absolute top-2 right-2 w-2 h-2 bg-danger-500 rounded-full"></span>
-              </button>
-
-              <!-- User Menu -->
-              <div class="flex items-center gap-3 pl-4 border-l border-neutral-200">
-                <div class="hidden sm:block text-right">
-                  <strong id="user-name" class="block text-sm text-neutral-900">User Name</strong>
-                  <span id="user-email" class="text-xs text-neutral-500">email@example.com</span>
-                </div>
-                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white font-semibold cursor-pointer hover:shadow-lg transition-all" id="user-avatar">
-                  U
-                </div>
-
-                <!-- Dropdown Menu -->
-                <div class="relative group">
-                  <button class="btn-ghost p-2" type="button" aria-label="User menu">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                    </svg>
-                  </button>
-                  
-                  <div class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-xl border border-neutral-200 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-250 z-50">
-                    <a href="#" class="block px-4 py-2.5 text-sm text-neutral-700 hover:bg-neutral-50 first:rounded-t-lg">Profil Saya</a>
-                    <a href="#" class="block px-4 py-2.5 text-sm text-neutral-700 hover:bg-neutral-50">Pengaturan</a>
-                    <a href="#" class="block px-4 py-2.5 text-sm text-neutral-700 hover:bg-neutral-50">Bantuan</a>
-                    <hr class="border-neutral-200 my-1">
-                    <button id="logout-button" class="w-full text-left px-4 py-2.5 text-sm text-danger-600 hover:bg-danger-50 last:rounded-b-lg" type="button">
-                      Keluar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </header>
-
-          <!-- STATUS REGION -->
-          <section id="status-region" class="status-region" aria-live="polite" aria-atomic="true">
-            <!-- Alert messages will appear here -->
-          </section>
-
-          <!-- CONTENT REGION -->
-          <section id="content-region" class="content-region">
-            <!-- Page content will be loaded here -->
-          </section>
-        </main>
-      </section>
+        <div class="alert alert-info py-2 small" role="info">
+          <i class="bi bi-info-circle me-2"></i>
+          <strong>Tip:</strong> Gunakan akun demo untuk testing atau masuk dengan kredensial Anda sendiri.
+        </div>
+      </div>
     </div>
 
-    <!-- Mobile Overlay for Sidebar -->
-    <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 lg:hidden hidden z-30" aria-hidden="true"></div>
-  </body>
+    <!-- ====== APPLICATION SHELL ====== -->
+    <div id="shell-screen" class="d-flex" style="min-height: 100vh; display: none;" hidden>
+      <!-- Sidebar -->
+      <nav id="sidebar" class="sidebar" style="width: 280px; display: none;">
+        <div class="sidebar-brand">
+          <i class="bi bi-graph-up text-primary" style="font-size: 1.5rem;"></i>
+          <div>
+            <div class="fw-bold text-primary">SPK Bansos</div>
+            <small class="text-muted d-block">v2.0</small>
+          </div>
+        </div>
+
+        <div class="sidebar-menu" style="flex: 1; overflow-y: auto;">
+          <nav id="main-menu" class="nav flex-column"></nav>
+        </div>
+
+        <div class="sidebar-footer p-3 border-top small text-muted">
+          <div class="d-flex align-items-center" style="gap: 0.5rem;">
+            <span class="badge bg-success rounded-circle" style="width: 8px; height: 8px;"></span>
+            <span>Connected</span>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Main Content -->
+      <div class="main-content" style="flex: 1; display: flex; flex-direction: column;">
+        <!-- Topbar -->
+        <header class="navbar navbar-expand-lg border-bottom" style="background-color: white;">
+          <div class="container-fluid px-4">
+            <button id="toggle-sidebar" class="btn btn-sm btn-outline-secondary d-lg-none me-2" type="button" aria-label="Toggle sidebar">
+              <i class="bi bi-list"></i>
+            </button>
+
+            <div style="flex: 1;">
+              <p class="eyebrow mb-0">Dashboard</p>
+              <h1 id="page-title" class="h4 mb-0 fw-bold">Ringkasan</h1>
+            </div>
+
+            <form class="d-none d-md-flex me-3" style="flex-shrink: 0;">
+              <input class="form-control form-control-sm" type="search" placeholder="Cari..." aria-label="Search">
+            </form>
+
+            <div class="d-flex align-items-center" style="gap: 0.5rem; flex-shrink: 0;">
+              <button class="btn btn-sm btn-link position-relative" type="button" style="text-decoration: none;">
+                <i class="bi bi-bell"></i>
+                <span class="badge bg-danger rounded-circle position-absolute" style="top: -8px; right: -8px; width: 16px; height: 16px; padding: 0; display: flex; align-items: center; justify-content: center; font-size: 0.625rem;">3</span>
+              </button>
+
+              <div class="dropdown">
+                <button class="btn btn-sm btn-link dropdown-toggle" type="button" id="user-menu" data-bs-toggle="dropdown" style="text-decoration: none;">
+                  <img class="rounded-circle" src="https://ui-avatars.com/api/?name=User&background=174e4a&color=fff" alt="User" style="width: 32px; height: 32px;">
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="user-menu">
+                  <li><h6 class="dropdown-header" id="user-name">User Name</h6></li>
+                  <li><small class="dropdown-header text-muted" id="user-email">user@example.com</small></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><a class="dropdown-item" href="#"><i class="bi bi-person me-2"></i>Profile</a></li>
+                  <li><a class="dropdown-item" href="#"><i class="bi bi-gear me-2"></i>Settings</a></li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li><button id="logout-button" class="dropdown-item" type="button"><i class="bi bi-box-arrow-right me-2"></i>Logout</button></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <!-- Status Region -->
+        <div id="status-region" class="px-4 py-2"></div>
+
+        <!-- Content Region -->
+        <main id="content-region" style="flex: 1; padding: 1.5rem; overflow-y: auto;"></main>
+      </div>
+
+      <!-- Sidebar Overlay -->
+      <div id="sidebar-overlay" class="position-fixed top-0 start-0 w-100 h-100" style="background: rgba(0,0,0,0.5); z-index: 1029; display: none;"></div>
+    </div>
+  </div>
+
+  <!-- Modal for confirmations -->
+  <div id="confirm-modal" class="modal fade" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header border-0">
+          <h5 class="modal-title fw-bold" id="modal-title">Konfirmasi</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="modal-body">Apakah Anda yakin?</div>
+        <div class="modal-footer border-0">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="button" class="btn btn-primary" id="modal-confirm">Konfirmasi</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading spinner template -->
+  <template id="loading-template">
+    <div class="text-center p-5">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p class="text-muted mt-3 small">Memuat konten...</p>
+    </div>
+  </template>
+</body>
 </html>

@@ -14,7 +14,10 @@ class CheckRoleMiddleware
 
         if (! $user || ! in_array($user->role, $roles, true)) {
             return response()->json([
+                'success' => false,
+                'code' => 403,
                 'message' => 'Anda tidak memiliki akses untuk fitur ini.',
+                'data' => null,
                 'errors' => [
                     'role' => ['Role pengguna tidak diizinkan.'],
                 ],

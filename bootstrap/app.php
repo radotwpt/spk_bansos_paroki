@@ -26,7 +26,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (AuthenticationException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
+                    'success' => false,
+                    'code' => 401,
                     'message' => 'Unauthenticated.',
+                    'data' => null,
                     'errors' => [
                         'auth' => ['Token tidak valid atau belum login.'],
                     ],
@@ -39,7 +42,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (AuthorizationException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
+                    'success' => false,
+                    'code' => 403,
                     'message' => 'Anda tidak memiliki akses untuk fitur ini.',
+                    'data' => null,
                     'errors' => [
                         'authorization' => [$e->getMessage() ?: 'Akses ditolak.'],
                     ],
@@ -52,7 +58,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (ModelNotFoundException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
+                    'success' => false,
+                    'code' => 404,
                     'message' => 'Data tidak ditemukan.',
+                    'data' => null,
                     'errors' => [
                         'model' => ['Data yang diminta tidak tersedia.'],
                     ],
@@ -65,7 +74,10 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (ValidationException $e, Request $request) {
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
+                    'success' => false,
+                    'code' => $e->status,
                     'message' => 'Data yang diberikan tidak valid.',
+                    'data' => null,
                     'errors' => $e->errors(),
                 ], $e->status);
             }

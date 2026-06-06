@@ -4,11 +4,11 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
     plugins: [
+        tailwindcss(),
         laravel({
-            input: ['resources/css/app.css', 'resources/js/app.js'],
+            input: ['resources/css/app.css', 'resources/js/app-modern.js', 'resources/js/pwa.js'],
             refresh: true,
         }),
-        tailwindcss(),
     ],
     server: {
         host: '127.0.0.1',
@@ -19,4 +19,16 @@ export default defineConfig({
             ignored: ['**/storage/framework/views/**'],
         },
     },
+    build: {
+        outDir: 'public/build',
+        manifest: 'manifest.json',
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    vendor: ['bootstrap'],
+                }
+            }
+        }
+    }
 });
+

@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Concerns\RespondsWithApi;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Auth\LoginRequest;
+use App\Http\Resources\UserResource;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
@@ -12,12 +14,9 @@ class AuthController extends Controller
 {
     use RespondsWithApi;
 
-    public function login(Request $request)
+    public function login(LoginRequest $request)
     {
-        $credentials = $request->validate([
-            'email' => ['required', 'email'],
-            'password' => ['required', 'string'],
-        ]);
+        $credentials = $request->only(['email', 'password']);
 
         if (! Auth::attempt($credentials)) {
             throw ValidationException::withMessages([
@@ -26,16 +25,19 @@ class AuthController extends Controller
         }
 
         $user = $request->user();
+        $tokenName = $request->input('device_name') ?: sprintf('api-%s', now()->format('YmdHis'));
+        $token = $user->createToken($tokenName)->plainTextToken;
 
         return $this->success([
-            'token' => $user->createToken('api-token')->plainTextToken,
-            'user' => $user,
+            'token' => $token,
+            'token_type' => 'Bearer',
+            'user' => new UserResource($user),
         ], 'Login berhasil.');
     }
 
     public function me(Request $request)
     {
-        return $this->success($request->user(), 'Data user login berhasil diambil.');
+        return $this->success(new UserResource($request->user()), 'Data user login berhasil diambil.');
     }
 
     public function logout(Request $request)

@@ -1,51 +1,123 @@
 import './bootstrap';
 import './sw-register';
-import {
-    escapeHtml,
-    formatDate,
-    formatTime,
-    showStatus,
-    showModal,
-    createMenuItemHtml,
-    toggleSidebar,
-    debounce,
-} from './ui-helpers';
+import { KetuaLingkunganStasiModule } from './modules/ketua-lingkungan-stasi.js';
+import { StasiModule } from './modules/stasi.js';
+import { KetuaLingkunganParokiModule } from './modules/ketua-lingkungan-paroki.js';
+import { ParokiModule } from './modules/paroki.js';
+
+// Utility Functions
+function toggleSidebar(sidebar, overlay, toggle, force) {
+    const isOpen = sidebar.style.display !== 'none';
+    const shouldOpen = force !== undefined ? force : !isOpen;
+    
+    if (shouldOpen) {
+        sidebar.style.display = '';
+        overlay.style.display = '';
+    } else {
+        sidebar.style.display = 'none';
+        overlay.style.display = 'none';
+    }
+    
+    if (toggle) {
+        toggle.setAttribute('aria-expanded', shouldOpen);
+    }
+}
+
+function createMenuItemHtml(item, isActive = false) {
+    const activeClass = isActive ? 'active' : '';
+    return `
+        <a class="menu-item ${activeClass}" href="#" data-menu="${item.id}" role="menuitem">
+            <i class="bi bi-${item.icon}"></i>
+            <span>${item.label}</span>
+        </a>
+    `;
+}
+
+function formatViewTitle(viewId) {
+    const menuItem = Object.values(roleMenus)
+        .flat()
+        .find((item) => item.id === viewId);
+    return menuItem?.label ?? viewId.replace(/-/g, ' ');
+}
+
+function showConfirmModal(title, message, confirmLabel = 'Konfirmasi', cancelLabel = 'Batal') {
+    const modalElement = document.getElementById('confirm-modal');
+    if (!modalElement || !window.bootstrap?.Modal) {
+        return Promise.resolve(window.confirm(message));
+    }
+
+    return new Promise((resolve) => {
+        const modal = window.bootstrap.Modal.getOrCreateInstance(modalElement);
+        const titleElement = document.getElementById('modal-title');
+        const bodyElement = document.getElementById('modal-body');
+        const confirmButton = document.getElementById('modal-confirm');
+        const cancelButton = modalElement.querySelector('[data-bs-dismiss="modal"]');
+        let settled = false;
+
+        if (titleElement) titleElement.textContent = title;
+        if (bodyElement) bodyElement.textContent = message;
+        if (confirmButton) confirmButton.textContent = confirmLabel;
+        if (cancelButton) cancelButton.textContent = cancelLabel;
+
+        const cleanup = () => {
+            modalElement.removeEventListener('hidden.bs.modal', onHidden);
+            confirmButton?.removeEventListener('click', onConfirm);
+        };
+
+        const onConfirm = () => {
+            settled = true;
+            cleanup();
+            modal.hide();
+            resolve(true);
+        };
+
+        const onHidden = () => {
+            cleanup();
+            if (!settled) {
+                resolve(false);
+            }
+        };
+
+        confirmButton?.addEventListener('click', onConfirm, { once: true });
+        modalElement.addEventListener('hidden.bs.modal', onHidden, { once: true });
+        modal.show();
+    });
+}
 
 const appRoot = document.getElementById('app');
 const apiBase = appRoot?.dataset.apiBase ?? '/api/v1';
 const tokenKey = 'spk_bansos_token';
 
-// Role-based menu configuration dengan icons
+// Role-based menu configuration dengan Bootstrap icons
 const roleMenus = {
     super_admin: [
-        { id: 'dashboard', label: '📊 Ringkasan' },
-        { id: 'admin-master', label: '⚙️ Master Data' },
-        { id: 'candidates', label: '👥 Calon Penerima' },
-        { id: 'activity-log', label: '📋 Log Aktivitas' },
-        { id: 'documents', label: '📄 Dokumen' },
+        { id: 'dashboard', label: 'Ringkasan', icon: 'graph-up' },
+        { id: 'admin-master', label: 'Master Data', icon: 'gear' },
+        { id: 'candidates', label: 'Calon Penerima', icon: 'people' },
+        { id: 'activity-log', label: 'Log Aktivitas', icon: 'clipboard-data' },
+        { id: 'documents', label: 'Dokumen', icon: 'file-text' },
     ],
     ketua_lingkungan_stasi: [
-        { id: 'dashboard', label: '📊 Ringkasan' },
-        { id: 'my-candidates', label: '📋 Calon Saya' },
-        { id: 'candidate-form', label: '➕ Input Calon' },
-        { id: 'activity-log', label: '📋 Log Aktivitas' },
+        { id: 'dashboard', label: 'Ringkasan', icon: 'graph-up' },
+        { id: 'calon-penerima', label: 'Calon Penerima', icon: 'people' },
+        { id: 'activity-log', label: 'Log Aktivitas', icon: 'clipboard-data' },
     ],
     stasi: [
-        { id: 'dashboard', label: '📊 Ringkasan' },
-        { id: 'stasi-recap', label: '📈 Rekap Stasi' },
-        { id: 'documents', label: '📄 Surat' },
-        { id: 'activity-log', label: '📋 Log Aktivitas' },
+        { id: 'dashboard', label: 'Ringkasan', icon: 'graph-up' },
+        { id: 'stasi-recap', label: 'Rekap Stasi', icon: 'bar-chart' },
+        { id: 'documents', label: 'Surat', icon: 'file-text' },
+        { id: 'activity-log', label: 'Log Aktivitas', icon: 'clipboard-data' },
     ],
     ketua_lingkungan_paroki: [
-        { id: 'dashboard', label: '📊 Ringkasan' },
-        { id: 'saw', label: '⚙️ Proses SAW' },
-        { id: 'activity-log', label: '📋 Log Aktivitas' },
+        { id: 'dashboard', label: 'Ringkasan', icon: 'graph-up' },
+        { id: 'saw', label: 'Proses SAW', icon: 'gear' },
+        { id: 'activity-log', label: 'Log Aktivitas', icon: 'clipboard-data' },
     ],
     paroki: [
-        { id: 'dashboard', label: '📊 Ringkasan' },
-        { id: 'ranking', label: '🏆 Ranking' },
-        { id: 'documents', label: '📋 Dokumen' },
-        { id: 'activity-log', label: '📋 Log Aktivitas' },
+        { id: 'dashboard', label: 'Ringkasan', icon: 'graph-up' },
+        { id: 'ranking', label: 'Ranking', icon: 'trophy' },
+        { id: 'documents', label: 'Dokumen', icon: 'file-text' },
+        { id: 'activity-log', label: 'Log Aktivitas', icon: 'clipboard-data' },
     ],
 };
 
@@ -63,6 +135,12 @@ const state = {
     user: null,
     activeView: 'dashboard',
     sidebarOpen: window.innerWidth >= 1024,
+    modules: {
+        ketuaLingkunganStasi: null,
+        stasi: null,
+        ketuaLingkunganParoki: null,
+        paroki: null,
+    },
 };
 
 // DOM Elements
@@ -80,18 +158,15 @@ const els = {
     demoUsers: document.querySelectorAll('.demo-user'),
 
     // Sidebar & Navigation
-    sidebar: document.getElementById('sidebar-nav'),
+    sidebar: document.getElementById('sidebar'),
     sidebarOverlay: document.getElementById('sidebar-overlay'),
     mainMenu: document.getElementById('main-menu'),
-    menuToggle: document.getElementById('menu-toggle'),
+    menuToggle: document.getElementById('toggle-sidebar'),
 
     // Topbar
     pageTitle: document.getElementById('page-title'),
-    sidebarRole: document.getElementById('sidebar-role'),
     userName: document.getElementById('user-name'),
     userEmail: document.getElementById('user-email'),
-    userAvatar: document.getElementById('user-avatar'),
-    topbarSearch: document.getElementById('topbar-search'),
 
     // Content Areas
     statusRegion: document.getElementById('status-region'),
@@ -176,40 +251,80 @@ function showLogin(message = '') {
     }
 }
 
-function showShell() {
+async function showShell() {
     els.loginScreen.hidden = true;
     els.shellScreen.hidden = false;
+    els.loginScreen.style.display = 'none';
+    els.shellScreen.style.display = '';
+
+    if (els.sidebar) {
+        els.sidebar.style.display = state.sidebarOpen ? '' : 'none';
+    }
+    if (els.sidebarOverlay) {
+        els.sidebarOverlay.style.display = 'none';
+    }
 
     // Update user info
     if (state.user) {
-        const initials = state.user.name
-            .split(' ')
-            .map((n) => n[0])
-            .join('')
-            .toUpperCase();
-        els.userAvatar.textContent = initials;
         els.userName.textContent = state.user.name;
         els.userEmail.textContent = state.user.email;
-        els.sidebarRole.textContent = roleLabels[state.user.role] || state.user.role;
+        initializeModules();
     }
 
-    // Rebuild menu
+    // Rebuild menu and render default view
     renderMenu();
+    loadView(state.activeView);
+}
+
+function initializeModules() {
+    // Initialize Ketua Lingkungan Stasi module
+    if (state.user?.role === 'ketua_lingkungan_stasi' && !state.modules.ketuaLingkunganStasi) {
+        state.modules.ketuaLingkunganStasi = new KetuaLingkunganStasiModule();
+    }
+    
+    // Initialize Stasi module
+    if (state.user?.role === 'stasi' && !state.modules.stasi) {
+        state.modules.stasi = new StasiModule();
+    }
+
+    // Initialize Ketua Lingkungan Paroki module
+    if (state.user?.role === 'ketua_lingkungan_paroki' && !state.modules.ketuaLingkunganParoki) {
+        state.modules.ketuaLingkunganParoki = new KetuaLingkunganParokiModule();
+    }
+
+    // Initialize Paroki module
+    if (state.user?.role === 'paroki' && !state.modules.paroki) {
+        state.modules.paroki = new ParokiModule();
+    }
 }
 
 function showLoginError(message) {
     els.loginError.textContent = message;
     els.loginError.hidden = false;
+    els.loginError.classList.remove('d-none');
 }
 
 function clearLoginError() {
     els.loginError.textContent = '';
     els.loginError.hidden = true;
+    els.loginError.classList.add('d-none');
 }
 
-function setPageTitle(title) {
-    els.pageTitle.textContent = title;
-    state.activeView = title.toLowerCase();
+function setPageTitle(viewId) {
+    els.pageTitle.textContent = formatViewTitle(viewId);
+}
+
+function escapeHtml(value) {
+    const str = String(value ?? '');
+    return str.replace(/[&<>"']/g, (char) => {
+        return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;',
+        }[char];
+    });
 }
 
 /**
@@ -252,21 +367,29 @@ async function loadView(viewId) {
     state.activeView = viewId;
     setPageTitle(viewId);
 
-    // Placeholder untuk loading berbagai views
+    // Show loading state
     els.contentRegion.innerHTML = `
-        <div class="flex items-center justify-center h-64">
-            <div class="text-center">
-                <div class="inline-block mb-4">
-                    <div class="w-12 h-12 rounded-full border-4 border-primary-200 border-t-primary-600 animate-spin"></div>
-                </div>
-                <p class="text-neutral-600">Memuat ${viewId}...</p>
+        <div class="text-center p-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
             </div>
+            <p class="text-muted mt-3 small">Memuat konten...</p>
         </div>
     `;
 
-    // Simulate content loading
+    // Route to module or template
     setTimeout(() => {
-        renderViewContent(viewId);
+        if (viewId === 'calon-penerima' && state.modules.ketuaLingkunganStasi) {
+            state.modules.ketuaLingkunganStasi.init(state.token, apiBase);
+        } else if (viewId === 'stasi-recap' && state.modules.stasi) {
+            state.modules.stasi.init(state.token, apiBase);
+        } else if (viewId === 'saw' && state.modules.ketuaLingkunganParoki) {
+            state.modules.ketuaLingkunganParoki.init(state.token, apiBase);
+        } else if (viewId === 'ranking' && state.modules.paroki) {
+            state.modules.paroki.init(state.token, apiBase);
+        } else {
+            renderViewContent(viewId);
+        }
     }, 500);
 }
 
@@ -417,13 +540,13 @@ els.loginForm.addEventListener('submit', async (e) => {
     els.loginSubmit.textContent = 'Memproses...';
 
     try {
-        const response = await api('/login', {
+        const response = await api('/auth/login', {
             method: 'POST',
             body: JSON.stringify({ email, password }),
         });
 
-        if (response?.token && response?.user) {
-            setSession(response.token, response.user);
+        if (response?.data?.token && response?.data?.user) {
+            setSession(response.data.token, response.data.user);
             showShell();
         } else {
             showLoginError('Login gagal. Periksa kembali kredensial Anda.');
@@ -461,18 +584,16 @@ els.sidebarOverlay?.addEventListener('click', () => {
 });
 
 els.logoutButton?.addEventListener('click', async () => {
-    const confirmed = await showModal(
-        '❓ Konfirmasi',
+    const confirmed = await showConfirmModal(
+        'Konfirmasi Logout',
         'Apakah Anda yakin ingin keluar dari sistem?',
-        [
-            { label: 'Batal', style: 'ghost', value: false },
-            { label: 'Keluar', style: 'danger', value: true },
-        ]
+        'Keluar',
+        'Batal'
     );
 
     if (confirmed) {
         try {
-            await api('/logout', { method: 'POST' });
+            await api('/auth/logout', { method: 'POST' });
         } catch (error) {
             console.error('Logout error:', error);
         } finally {
@@ -496,6 +617,11 @@ window.addEventListener('resize', () => {
  * Initialize App
  */
 function initializeApp() {
+    if (initializeApp.initialized) {
+        return;
+    }
+    initializeApp.initialized = true;
+
     if (isAuthenticated()) {
         showShell();
     } else {

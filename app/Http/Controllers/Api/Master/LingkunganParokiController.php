@@ -6,6 +6,7 @@ use App\Http\Controllers\Concerns\RespondsWithApi;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Master\StoreLingkunganParokiRequest;
 use App\Http\Requests\Master\UpdateLingkunganParokiRequest;
+use App\Http\Resources\LingkunganParokiResource;
 use App\Models\LingkunganParoki;
 use Illuminate\Http\Request;
 
@@ -15,8 +16,14 @@ class LingkunganParokiController extends Controller
 
     public function index(Request $request)
     {
-        $q = $request->query('q');
-        $perPage = (int) $request->query('per_page', 15);
+        $this->authorize('manage-master-data');
+
+        $q = trim((string) $request->query('q', ''));
+        $perPage = max(5, min(100, (int) $request->query('per_page', 15)));
+        $sort = (string) $request->query('sort', 'nama_lingkungan_paroki');
+        $order = strtolower((string) $request->query('order', 'asc')) === 'desc' ? 'desc' : 'asc';
+        $allowedSorts = ['nama_lingkungan_paroki', 'kode_wilayah', 'created_at', 'updated_at'];
+        $sort = in_array($sort, $allowedSorts, true) ? $sort : 'nama_lingkungan_paroki';
 
         $query = LingkunganParoki::query();
 
@@ -27,35 +34,43 @@ class LingkunganParokiController extends Controller
             });
         }
 
-        $items = $query->orderBy('nama_lingkungan_paroki')->paginate($perPage);
+        $items = $query->orderBy($sort, $order)->paginate($perPage)->withQueryString();
 
-        return $this->success($items, 'Daftar lingkungan paroki diambil.');
+        return $this->paginated($items, LingkunganParokiResource::collection($items->items()), 'Daftar lingkungan paroki diambil.');
     }
 
     public function store(StoreLingkunganParokiRequest $request)
     {
+        $this->authorize('manage-master-data');
+
         $item = LingkunganParoki::create($request->validated());
 
-        return $this->success($item, 'Lingkungan paroki berhasil dibuat.', 201);
+        return $this->success(new LingkunganParokiResource($item), 'Lingkungan paroki berhasil dibuat.', 201);
     }
 
     public function show($id)
     {
+        $this->authorize('manage-master-data');
+
         $item = LingkunganParoki::findOrFail($id);
 
-        return $this->success($item);
+        return $this->success(new LingkunganParokiResource($item), 'Detail lingkungan paroki diambil.');
     }
 
     public function update(UpdateLingkunganParokiRequest $request, $id)
     {
+        $this->authorize('manage-master-data');
+
         $item = LingkunganParoki::findOrFail($id);
         $item->update($request->validated());
 
-        return $this->success($item->fresh(), 'Lingkungan paroki berhasil diperbarui.');
+        return $this->success(new LingkunganParokiResource($item->fresh()), 'Lingkungan paroki berhasil diperbarui.');
     }
 
     public function destroy(Request $request, $id)
     {
+        $this->authorize('manage-master-data');
+
         $item = LingkunganParoki::findOrFail($id);
 
         if ($item->users()->exists()) {
