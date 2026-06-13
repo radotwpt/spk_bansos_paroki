@@ -5,6 +5,12 @@
 .env.production
 .phpactor.json
 .phpunit.result.cache
+.kilo
+.mcp_trash
+.vscode
+.*
+*.md
+*.txt
 /.fleet
 /.idea
 /.nova
