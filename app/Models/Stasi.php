@@ -2,29 +2,40 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Stasi extends Model
 {
-    use HasFactory;
+    protected $fillable = [
+        'paroki_id',
+        'code',
+        'name',
+        'address',
+        'phone',
+        'leader_name',
+        'notes',
+        'is_active',
+    ];
 
-    protected $table = 'stasis';
-
-    protected $guarded = ['id'];
-
-    public function lingkunganStasis()
+    protected function casts(): array
     {
-        return $this->hasMany(LingkunganStasi::class, 'stasi_id');
+        return ['is_active' => 'boolean'];
     }
 
-    public function users()
+    public function paroki(): BelongsTo
     {
-        return $this->hasMany(User::class, 'stasi_id');
+        return $this->belongsTo(Paroki::class);
     }
 
-    public function calonPenerimas()
+    public function lingkungans(): HasMany
     {
-        return $this->hasMany(CalonPenerima::class, 'stasi_id');
+        return $this->hasMany(Lingkungan::class);
+    }
+
+    public function calonPenerimas(): HasMany
+    {
+        return $this->hasMany(CalonPenerima::class);
     }
 }

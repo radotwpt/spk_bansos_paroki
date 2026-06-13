@@ -1,0 +1,26 @@
+{
+  "name": "mcp-server-bansos",
+  "version": "1.0.0",
+  "description": "MCP Server for SPK Bansos with MySQL and TDD tools",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-server-bansos": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
+  },
+  "keywords": ["mcp", "mysql", "tdd"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "mysql2": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

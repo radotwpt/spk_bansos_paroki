@@ -2,58 +2,85 @@
 
 namespace App\Policies;
 
-use App\Models\User;
 use App\Models\CalonPenerima;
+use App\Models\User;
 
 class CalonPenerimaPolicy
 {
-    public function view(User $user, CalonPenerima $calon)
+    /**
+     * Determine if the user can view the model.
+     */
+    public function view(User $user, CalonPenerima $calonPenerima): bool
     {
-        if (in_array($user->role ?? '', ['super_admin'])) return true;
-        if ($user->role === 'ketua_lingkungan_stasi' && $user->lingkungan_stasi_id === $calon->lingkungan_stasi_id) return true;
-        if ($user->role === 'stasi' && $user->stasi_id === $calon->stasi_id) return true;
+        // Super admin can view all
+        if ($user->hasRole('super_admin')) {
+            return true;
+        }
+
+        // Admin paroki can view candidates in their paroki
+        if ($user->hasRole('paroki') && $user->paroki_id === $calonPenerima->paroki_id) {
+            return true;
+        }
+
+        // Stasi coordinator can view candidates in their stasi
+        if ($user->hasRole('stasi') && $user->stasi_id === $calonPenerima->stasi_id) {
+            return true;
+        }
+
+        // Lingkungan leader can view candidates in their lingkungan
+        if ($user->hasRole('ketua_lingkungan_stasi') && $user->lingkungan_id === $calonPenerima->lingkungan_id) {
+            return true;
+        }
+
         return false;
     }
 
-    public function update(User $user, CalonPenerima $calon)
+    /**
+     * Determine if the user can create models.
+     */
+    public function create(User $user): bool
     {
-        if (in_array($user->role ?? '', ['super_admin'])) return true;
-
-        // Only allow updates when still in draft
-        if ($calon->status_alur !== 'draft') return false;
-
-        return $this->view($user, $calon);
+        return $user->hasRole('ketua_lingkungan_stasi') || $user->hasRole('super_admin');
     }
 
-    public function delete(User $user, CalonPenerima $calon)
+    /**
+     * Determine if the user can update the model.
+     */
+    public function update(User $user, CalonPenerima $calonPenerima): bool
     {
-        if (in_array($user->role ?? '', ['super_admin'])) return true;
+        // Only creator or super admin can edit draft/revision status
+        if (in_array($calonPenerima->status, ['draft', 'revision_requested'], true)) {
+            return $user->id === $calonPenerima->created_by || $user->hasRole('super_admin');
+        }
 
-        // Only allow deletes when still in draft
-        if ($calon->status_alur !== 'draft') return false;
-
-        return $this->view($user, $calon);
+        return $user->hasRole('super_admin');
     }
 
-    public function approve(User $user, CalonPenerima $calon)
+    /**
+     * Determine if the user can delete the model.
+     */
+    public function delete(User $user, CalonPenerima $calonPenerima): bool
     {
-        if (in_array($user->role ?? '', ['super_admin'])) return true;
-
-        // Only stasi can approve
-        if ($user->role !== 'stasi') return false;
-
-        // Check if from same stasi
-        return $user->stasi_id === $calon->stasi_id;
+        return $user->id === $calonPenerima->created_by || $user->hasRole('super_admin');
     }
 
-    public function reject(User $user, CalonPenerima $calon)
+    /**
+     * Determine if user can approve/reject candidate
+     */
+    public function approve(User $user, CalonPenerima $calonPenerima): bool
     {
-        if (in_array($user->role ?? '', ['super_admin'])) return true;
+        if ($user->hasRole('super_admin')) {
+            return true;
+        }
 
-        // Only stasi can reject
-        if ($user->role !== 'stasi') return false;
+        if ($calonPenerima->status === 'submitted_to_stasi') {
+            return $user->hasRole('stasi') && $user->stasi_id === $calonPenerima->stasi_id;
+        }
 
-        // Check if from same stasi
-        return $user->stasi_id === $calon->stasi_id;
+        if ($calonPenerima->status === 'sent_to_paroki') {
+            return $user->hasRole('paroki') && $user->paroki_id === $calonPenerima->paroki_id;
+        }
+
+        return false;
     }
 }

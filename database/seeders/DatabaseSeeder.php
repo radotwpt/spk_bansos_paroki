@@ -2,13 +2,11 @@
 
 namespace Database\Seeders;
 
-use App\Models\BansosPeriod;
-use App\Models\LingkunganParoki;
-use App\Models\LingkunganStasi;
-use App\Models\Stasi;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
@@ -19,90 +17,44 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        $stasi = Stasi::firstOrCreate([
-            'kode_stasi' => 'ST-001',
-        ], [
-            'nama_stasi' => 'Stasi Santo Paulus',
-            'alamat' => 'Alamat stasi contoh',
-        ]);
+        $now = now();
 
-        $lingkunganStasi = LingkunganStasi::firstOrCreate([
-            'kode_lingkungan' => 'LS-001',
-        ], [
-            'stasi_id' => $stasi->id,
-            'nama_lingkungan_stasi' => 'Lingkungan Stasi 1',
-        ]);
+        // ===== SEED ROLES FIRST =====
+        DB::table('roles')->upsert([
+            [
+                'name' => 'ketua_lingkungan_stasi',
+                'label' => 'Ketua Lingkungan Stasi',
+                'description' => 'Menginput dan mengajukan data calon penerima bantuan dari lingkungan stasi.',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'name' => 'stasi',
+                'label' => 'Stasi',
+                'description' => 'Memvalidasi calon penerima, membuat surat permohonan, dan mengirim pengajuan ke paroki.',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'name' => 'paroki',
+                'label' => 'Paroki',
+                'description' => 'Menjalankan ranking SAW, meninjau urgensi, dan menetapkan penerima bantuan.',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            [
+                'name' => 'super_admin',
+                'label' => 'Super Admin',
+                'description' => 'Akses penuh untuk konfigurasi, data master, dan seluruh proses bantuan sosial.',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+        ], ['name'], ['label', 'description', 'updated_at']);
 
-        $lingkunganParoki = LingkunganParoki::firstOrCreate([
-            'kode_wilayah' => 'LP-001',
-        ], [
-            'nama_lingkungan_paroki' => 'Lingkungan Paroki 1',
+        // ===== CALL OTHER SEEDERS =====
+        $this->call([
+            MasterDataSeeder::class,
+            UserSeeder::class,
         ]);
-
-        BansosPeriod::firstOrCreate([
-            'nama_periode' => 'Bansos 2026',
-            'tahun' => 2026,
-        ], [
-            'status_periode' => 'aktif',
-        ]);
-
-        User::updateOrCreate([
-            'email' => 'admin@example.com',
-        ], [
-            'name' => 'Super Admin Demo',
-            'password' => 'password',
-            'role' => 'super_admin',
-            'stasi_id' => null,
-            'lingkungan_stasi_id' => null,
-            'lingkungan_paroki_id' => null,
-        ]);
-
-        User::updateOrCreate([
-            'email' => 'test@example.com',
-        ], [
-            'name' => 'Ketua Lingkungan Stasi Demo',
-            'password' => 'password',
-            'role' => 'ketua_lingkungan_stasi',
-            'stasi_id' => $stasi->id,
-            'lingkungan_stasi_id' => $lingkunganStasi->id,
-            'lingkungan_paroki_id' => null,
-        ]);
-
-        User::updateOrCreate([
-            'email' => 'stasi@example.com',
-        ], [
-            'name' => 'Stasi Demo',
-            'password' => 'password',
-            'role' => 'stasi',
-            'stasi_id' => $stasi->id,
-            'lingkungan_stasi_id' => null,
-            'lingkungan_paroki_id' => null,
-        ]);
-
-        User::updateOrCreate([
-            'email' => 'ketua.paroki@example.com',
-        ], [
-            'name' => 'Ketua Lingkungan Paroki Demo',
-            'password' => 'password',
-            'role' => 'ketua_lingkungan_paroki',
-            'stasi_id' => null,
-            'lingkungan_stasi_id' => null,
-            'lingkungan_paroki_id' => $lingkunganParoki->id,
-        ]);
-
-        User::updateOrCreate([
-            'email' => 'paroki@example.com',
-        ], [
-            'name' => 'Paroki Demo',
-            'password' => 'password',
-            'role' => 'paroki',
-            'stasi_id' => null,
-            'lingkungan_stasi_id' => null,
-            'lingkungan_paroki_id' => $lingkunganParoki->id,
-        ]);
-
-        // SAW criteria and default global weights
-        $this->call(\Database\Seeders\SawCriteriaSeeder::class);
-        $this->call(\Database\Seeders\DocumentTemplateSeeder::class);
     }
 }

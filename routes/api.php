@@ -1,138 +1,105 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\DocumentTemplateController;
-use App\Http\Controllers\Api\GeneratedLetterController;
-use App\Http\Controllers\Api\KetuaLingkunganParokiController;
-use App\Http\Controllers\Api\SawController;
-use App\Http\Controllers\Api\KetuaLingkunganStasiController;
-use App\Http\Controllers\Api\OfflineSyncController;
-use App\Http\Controllers\Api\ParokiController;
-use App\Http\Controllers\Api\ActivityLogController;
-use App\Http\Controllers\Api\StasiController;
-use App\Http\Controllers\Api\Master\StasiController as MasterStasiController;
-use App\Http\Controllers\Api\Master\LingkunganStasiController as MasterLingkunganStasiController;
-use App\Http\Controllers\Api\Master\LingkunganParokiController as MasterLingkunganParokiController;
-use App\Http\Controllers\Api\Master\BansosPeriodController as MasterBansosPeriodController;
-use App\Http\Controllers\Api\Master\UserController as MasterUserController;
+use App\Http\Controllers\Api\CalonPenerimaController;
+use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\MasterDataController;
+use App\Http\Controllers\Api\PenerimaBantuanController;
+use App\Http\Controllers\Api\RankingController;
+use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\UserController;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::post('/v1/auth/login', [AuthController::class, 'login']);
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register API routes for your application. These
+| routes are loaded by the RouteServiceProvider and all of them will
+| be assigned to the "api" middleware group. Make something great!
+|
+*/
 
-Route::middleware('auth:sanctum')->group(function () {
-    Route::get('/v1/auth/me', [AuthController::class, 'me']);
-    Route::post('/v1/auth/logout', [AuthController::class, 'logout']);
-
-    // Global template APIs (phase 4)
-    Route::middleware(['role:super_admin,paroki,stasi'])->prefix('v1')->group(function () {
-        Route::get('/templates', [DocumentTemplateController::class, 'index']);
-        Route::get('/templates/{id}', [DocumentTemplateController::class, 'show']);
-        Route::post('/templates/{id}/render/{calonId?}', [DocumentTemplateController::class, 'render']);
+Route::prefix('v1')->group(function () {
+    // ===== PUBLIC ROUTES (No authentication required) =====
+    Route::prefix('auth')->group(function () {
+        Route::post('login', [AuthController::class, 'login'])->name('auth.login');
     });
 
-    Route::middleware(['role:super_admin,paroki'])->prefix('v1')->group(function () {
-        Route::post('/templates', [DocumentTemplateController::class, 'store']);
-        Route::put('/templates/{id}', [DocumentTemplateController::class, 'update']);
-        Route::delete('/templates/{id}', [DocumentTemplateController::class, 'destroy']);
+    // ===== PROTECTED ROUTES (Require authentication) =====
+    Route::middleware('auth:sanctum')->group(function () {
+        // ===== Auth Routes =====
+        Route::prefix('auth')->group(function () {
+            Route::get('me', [AuthController::class, 'me'])->name('auth.me');
+            Route::post('logout', [AuthController::class, 'logout'])->name('auth.logout');
+        });
+
+        // ===== User Management =====
+        Route::apiResource('users', UserController::class)
+            ->names(['index' => 'users.index', 'store' => 'users.store', 'show' => 'users.show', 'update' => 'users.update', 'destroy' => 'users.destroy']);
+
+        // ===== Master Data (Generic CRUD for common entities) =====
+        Route::prefix('master-data')->group(function () {
+            Route::get('roles', [MasterDataController::class, 'roles'])->name('master-data.roles');
+
+            Route::get('{resource}', [MasterDataController::class, 'index'])->name('master-data.index');
+            Route::post('{resource}', [MasterDataController::class, 'store'])->name('master-data.store');
+            Route::get('{resource}/{id}', [MasterDataController::class, 'show'])->name('master-data.show');
+            Route::put('{resource}/{id}', [MasterDataController::class, 'update'])->name('master-data.update');
+            Route::delete('{resource}/{id}', [MasterDataController::class, 'destroy'])->name('master-data.destroy');
+        });
+
+        // ===== Calon Penerima (Beneficiary Candidates) =====
+        Route::prefix('calon-penerimas')->group(function () {
+            Route::get('', [CalonPenerimaController::class, 'index'])->name('calon-penerimas.index');
+            Route::post('', [CalonPenerimaController::class, 'store'])->name('calon-penerimas.store');
+            Route::post('batch-submit', [CalonPenerimaController::class, 'batchSubmit'])->name('calon-penerimas.batch-submit');
+            Route::get('{calonPenerima}', [CalonPenerimaController::class, 'show'])->name('calon-penerimas.show');
+            Route::put('{calonPenerima}', [CalonPenerimaController::class, 'update'])->name('calon-penerimas.update');
+            Route::delete('{calonPenerima}', [CalonPenerimaController::class, 'destroy'])->name('calon-penerimas.destroy');
+
+            // Workflow Transitions
+            Route::post('{calonPenerima}/transition/{action}', [CalonPenerimaController::class, 'transition'])
+                ->name('calon-penerimas.transition');
+        });
+
+        // ===== SAW Ranking & Decision Making =====
+        Route::prefix('ranking')->group(function () {
+            Route::post('calculate', [RankingController::class, 'calculate'])->name('ranking.calculate');
+            Route::get('results/{periodeBantuan}', [RankingController::class, 'results'])->name('ranking.results');
+            Route::post('finalize/{periodeBantuan}', [RankingController::class, 'finalize'])->name('ranking.finalize');
+            Route::get('weights/{periodeBantuan}', [RankingController::class, 'getWeights'])->name('ranking.weights');
+            Route::put('weights/{periodeBantuan}', [RankingController::class, 'updateWeights'])->name('ranking.weights.update');
+        });
+
+        // ===== Reports & Exports =====
+        Route::prefix('reports')->group(function () {
+            Route::get('candidate-list/{periodeBantuan}', [ReportController::class, 'candidateList'])->name('reports.candidate-list');
+            Route::get('ranking-results/{periodeBantuan}', [ReportController::class, 'rankingResults'])->name('reports.ranking-results');
+            Route::get('beneficiaries/{periodeBantuan}', [ReportController::class, 'beneficiaryList'])->name('reports.beneficiaries');
+            Route::post('surat-permohonan/{periodeBantuan}', [ReportController::class, 'generateSuratPermohonan'])->name('reports.surat-permohonan');
+            Route::get('export/{reportType}/{periodeBantuan}', [ReportController::class, 'export'])->name('reports.export');
+        });
+
+        // ===== Penerima Bantuan (Final Beneficiaries) =====
+        Route::prefix('penerima-bantuans')->group(function () {
+            Route::get('', [PenerimaBantuanController::class, 'index'])->name('penerima-bantuans.index');
+            Route::get('{penerimaBantuan}', [PenerimaBantuanController::class, 'show'])->name('penerima-bantuans.show');
+            Route::put('{penerimaBantuan}', [PenerimaBantuanController::class, 'update'])->name('penerima-bantuans.update');
+            Route::post('{penerimaBantuan}/mark-disbursed', [PenerimaBantuanController::class, 'markDisbursed'])->name('penerima-bantuans.mark-disbursed');
+        });
+
+        // ===== Dashboard & Analytics =====
+        Route::prefix('dashboard')->group(function () {
+            Route::get('summary/{periodeBantuan}', [DashboardController::class, 'summary'])->name('dashboard.summary');
+            Route::get('statistics/{periodeBantuan}', [DashboardController::class, 'statistics'])->name('dashboard.statistics');
+        });
     });
+});
 
-    // Global letter APIs (phase 4)
-    Route::middleware(['role:super_admin,paroki,stasi'])->prefix('v1/letters')->group(function () {
-        Route::get('/', [GeneratedLetterController::class, 'index']);
-        Route::get('/periods', [GeneratedLetterController::class, 'periods']);
-        Route::get('/stasis', [GeneratedLetterController::class, 'stasis']);
-        Route::get('/next-number', [GeneratedLetterController::class, 'nextNumber']);
-        Route::get('/{id}', [GeneratedLetterController::class, 'show']);
-        Route::delete('/{id}', [GeneratedLetterController::class, 'destroy']);
-        Route::get('/{id}/pdf', [GeneratedLetterController::class, 'downloadPdf']);
-    });
-
-    Route::middleware(['role:super_admin,stasi'])->prefix('v1/letters')->group(function () {
-        Route::post('/generate-permohonan-stasi', [GeneratedLetterController::class, 'generatePermohonanStasi']);
-    });
-
-    Route::middleware(['role:super_admin,paroki'])->prefix('v1/letters')->group(function () {
-        Route::post('/generate-edaran-paroki', [GeneratedLetterController::class, 'generateEdaranParoki']);
-    });
-
-    // Ketua Lingkungan Stasi
-    Route::middleware(['role:ketua_lingkungan_stasi,super_admin'])->prefix('v1/lingkungan-stasi')->group(function () {
-        Route::get('/calon-penerima', [KetuaLingkunganStasiController::class, 'index']);
-        Route::post('/calon-penerima', [KetuaLingkunganStasiController::class, 'store']);
-        Route::put('/calon-penerima/{id}', [KetuaLingkunganStasiController::class, 'update']);
-        Route::delete('/calon-penerima/{id}', [KetuaLingkunganStasiController::class, 'destroy']);
-        Route::post('/calon-penerima/{id}/ajukan', [KetuaLingkunganStasiController::class, 'submitToStasi']);
-    });
-
-    // Stasi
-    Route::middleware(['role:stasi,super_admin'])->prefix('v1/stasi')->group(function () {
-        Route::get('/calon-penerima-rekap', [StasiController::class, 'indexCalonPenerima']);
-        Route::post('/calon-penerima/{id}/approve', [StasiController::class, 'approveByStasi']);
-        Route::post('/calon-penerima/{id}/reject', [StasiController::class, 'rejectByStasi']);
-        Route::post('/surat-permohonan/generate', [StasiController::class, 'generateSuratPermohonan']);
-        Route::put('/template-surat', [StasiController::class, 'updateTemplateSurat']);
-    });
-
-    // Ketua Lingkungan Paroki
-    Route::middleware(['role:ketua_lingkungan_paroki,super_admin'])->prefix('v1/lingkungan-paroki')->group(function () {
-        // Dashboard & Reporting
-        Route::get('/dashboard', [KetuaLingkunganParokiController::class, 'dashboard']);
-        Route::get('/ranking-list', [KetuaLingkunganParokiController::class, 'rankingList']);
-        Route::get('/saw-details/{candidateId}', [KetuaLingkunganParokiController::class, 'sawDetails']);
-        Route::get('/activity-logs', [KetuaLingkunganParokiController::class, 'activityLogs']);
-        Route::get('/reporting-summary', [KetuaLingkunganParokiController::class, 'reportingSummary']);
-        
-        // SAW Processing
-        Route::post('/proses-saw/{periodId}', [KetuaLingkunganParokiController::class, 'executeSawRanking']);
-        Route::post('/kirim-ke-paroki/{periodId}', [KetuaLingkunganParokiController::class, 'sendRankingToParoki']);
-        // SAW weights and preview
-        Route::get('/saw/weights/{periodId?}', [SawController::class, 'weights']);
-        Route::post('/saw/weights/{periodId?}', [SawController::class, 'saveWeights']);
-        Route::get('/saw/preview/{periodId}', [SawController::class, 'preview']);
-        Route::get('/saw/results/{periodId}', [SawController::class, 'results']);
-    });
-
-    // Ranking & SAW unified APIs (phase 3)
-    Route::middleware(['role:ketua_lingkungan_paroki,super_admin'])->prefix('v1/ranking')->group(function () {
-        Route::get('/periods', [SawController::class, 'periods']);
-        Route::get('/weights', [SawController::class, 'weights']);
-        Route::post('/weights', [SawController::class, 'saveWeights']);
-        Route::get('/preview', [SawController::class, 'preview']);
-        Route::post('/execute', [SawController::class, 'execute']);
-        Route::get('/results', [SawController::class, 'results']);
-        Route::post('/send-to-paroki/{periodId}', [SawController::class, 'sendToParoki']);
-    });
-
-    // Paroki
-    Route::middleware(['role:paroki,super_admin'])->prefix('v1/paroki')->group(function () {
-        Route::get('/ranking-periods', [SawController::class, 'periods']);
-        Route::get('/ranking-results', [SawController::class, 'results']);
-        Route::get('/ranking-data/{periodId}', [ParokiController::class, 'viewRankedData']);
-        Route::get('/ranking/{periodId}', [ParokiController::class, 'viewRankedData']);
-        Route::post('/penerima/{id}/keputusan', [ParokiController::class, 'finalizeDecision']);
-        Route::post('/surat-edaran/generate', [ParokiController::class, 'generateSuratEdaran']);
-        Route::put('/template-edaran', [ParokiController::class, 'updateTemplateEdaran']);
-
-        // Document templates & generated letters
-        Route::apiResource('/templates', DocumentTemplateController::class);
-        Route::post('/templates/{id}/render/{calonId?}', [DocumentTemplateController::class, 'render']);
-        Route::post('/surat/generate', [GeneratedLetterController::class, 'generateFromTemplate']);
-        Route::get('/surat', [GeneratedLetterController::class, 'index']);
-    });
-
-    // Master data (super_admin)
-    Route::middleware(['role:super_admin'])->prefix('v1/master')->group(function () {
-        Route::apiResource('/stasis', MasterStasiController::class);
-        Route::apiResource('/lingkungan-stasis', MasterLingkunganStasiController::class);
-        Route::apiResource('/lingkungan-parokis', MasterLingkunganParokiController::class);
-        Route::apiResource('/bansos-periods', MasterBansosPeriodController::class);
-        Route::apiResource('/users', MasterUserController::class);
-    });
-
-    // Activity logs
-    Route::get('/v1/logs', [ActivityLogController::class, 'index']);
-    Route::get('/v1/logs/calon-penerima/{id}', [ActivityLogController::class, 'byCandidate']);
-
-    // Offline sync endpoint (used by PWA IndexedDB drain)
-    Route::middleware(['role:ketua_lingkungan_stasi,super_admin'])->post('/v1/offline/sync', [OfflineSyncController::class, 'sync']);
+// ===== HEALTH CHECK (no auth required) =====
+Route::get('/health', function (Request $request) {
+    return response()->json(['status' => 'ok', 'timestamp' => now()]);
 });

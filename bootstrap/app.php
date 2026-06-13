@@ -1,14 +1,8 @@
 <?php
 
-use App\Http\Middleware\CheckRoleMiddleware;
-use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Auth\AuthenticationException;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Request;
-use Illuminate\Validation\ValidationException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -18,70 +12,8 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->alias([
-            'role' => CheckRoleMiddleware::class,
-        ]);
+        //
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->render(function (AuthenticationException $e, Request $request) {
-            if ($request->expectsJson() || $request->is('api/*')) {
-                return response()->json([
-                    'success' => false,
-                    'code' => 401,
-                    'message' => 'Unauthenticated.',
-                    'data' => null,
-                    'errors' => [
-                        'auth' => ['Token tidak valid atau belum login.'],
-                    ],
-                ], 401);
-            }
-
-            return null;
-        });
-
-        $exceptions->render(function (AuthorizationException $e, Request $request) {
-            if ($request->expectsJson() || $request->is('api/*')) {
-                return response()->json([
-                    'success' => false,
-                    'code' => 403,
-                    'message' => 'Anda tidak memiliki akses untuk fitur ini.',
-                    'data' => null,
-                    'errors' => [
-                        'authorization' => [$e->getMessage() ?: 'Akses ditolak.'],
-                    ],
-                ], 403);
-            }
-
-            return null;
-        });
-
-        $exceptions->render(function (ModelNotFoundException $e, Request $request) {
-            if ($request->expectsJson() || $request->is('api/*')) {
-                return response()->json([
-                    'success' => false,
-                    'code' => 404,
-                    'message' => 'Data tidak ditemukan.',
-                    'data' => null,
-                    'errors' => [
-                        'model' => ['Data yang diminta tidak tersedia.'],
-                    ],
-                ], 404);
-            }
-
-            return null;
-        });
-
-        $exceptions->render(function (ValidationException $e, Request $request) {
-            if ($request->expectsJson() || $request->is('api/*')) {
-                return response()->json([
-                    'success' => false,
-                    'code' => $e->status,
-                    'message' => 'Data yang diberikan tidak valid.',
-                    'data' => null,
-                    'errors' => $e->errors(),
-                ], $e->status);
-            }
-
-            return null;
-        });
+        //
     })->create();

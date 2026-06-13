@@ -2,18 +2,22 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SawCriterion extends Model
 {
-    use HasFactory;
-
     protected $table = 'saw_criteria';
-    protected $guarded = ['id'];
 
-    public function weights()
+    protected $fillable = ['code', 'name', 'type', 'attribute_key', 'description', 'is_active'];
+
+    protected function casts(): array
     {
-        return $this->hasMany(SawWeight::class, 'saw_criterion_id');
+        return ['is_active' => 'boolean'];
+    }
+
+    public function options(): HasMany
+    {
+        return $this->hasMany(SawCriterionOption::class);
     }
 }

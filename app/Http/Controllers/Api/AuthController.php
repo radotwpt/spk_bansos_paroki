@@ -2,58 +2,54 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Controllers\Concerns\RespondsWithApi;
+use App\Http\Controllers\Concerns\ApiResponse;
 use App\Http\Controllers\Controller;
-use App\Http\Requests\Auth\LoginRequest;
-use App\Http\Resources\UserResource;
+use App\Models\User;
+use App\Services\AuditService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    use RespondsWithApi;
+    use ApiResponse;
 
-    public function login(LoginRequest $request)
+    public function login(Request $request, AuditService $audit)
     {
-        $credentials = $request->only(['email', 'password']);
+        $credentials = $request->validate([
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+            'device_name' => ['nullable', 'string', 'max:100'],
+        ]);
 
-        if (! Auth::attempt($credentials)) {
+        $user = User::query()->with(['role', 'paroki', 'stasi', 'lingkungan'])->where('email', $credentials['email'])->first();
+
+        if (! $user || ! Hash::check($credentials['password'], $user->password) || ! $user->is_active) {
             throw ValidationException::withMessages([
-                'email' => ['Email atau password tidak sesuai.'],
+                'email' => ['Email, password, atau status akun tidak valid.'],
             ]);
         }
 
-        $user = $request->user();
-        $tokenName = $request->input('device_name') ?: sprintf('api-%s', now()->format('YmdHis'));
-        $token = $user->createToken($tokenName)->plainTextToken;
+        $token = $user->createToken($credentials['device_name'] ?? 'api-token')->plainTextToken;
+        $audit->record('auth.login', $user, metadata: ['email' => $user->email], request: $request);
 
         return $this->success([
-            'token' => $token,
             'token_type' => 'Bearer',
-            'user' => new UserResource($user),
+            'access_token' => $token,
+            'user' => $user,
         ], 'Login berhasil.');
     }
 
     public function me(Request $request)
     {
-        return $this->success(new UserResource($request->user()), 'Data user login berhasil diambil.');
+        return $this->success($request->user()->load(['role', 'paroki', 'stasi', 'lingkungan']));
     }
 
-    public function logout(Request $request)
+    public function logout(Request $request, AuditService $audit)
     {
-        $user = $request->user();
+        $request->user()->currentAccessToken()?->delete();
+        $audit->record('auth.logout', $request->user(), request: $request);
 
-        if ($request->boolean('all_devices')) {
-            $user?->tokens()->delete();
-        } else {
-            $token = $user?->currentAccessToken();
-
-            if ($token && method_exists($token, 'delete')) {
-                $token->delete();
-            }
-        }
-
-        return $this->success(null, 'Logout berhasil.');
+        return $this->success(message: 'Logout berhasil.');
     }
 }

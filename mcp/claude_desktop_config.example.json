@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "spk-bansos": {
+      "command": "mcp-server-bansos"
+    }
+  }
+}
